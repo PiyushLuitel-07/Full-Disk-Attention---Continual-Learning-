@@ -1,0 +1,7 @@
+# Use Python 3.10+ for a fresh environment. Install torch and torchvision using
+# the command recommended for the server's
+# CUDA driver at https://pytorch.org/get-started/locally/.
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+Pillow>=9.0

@@ -1,0 +1,44 @@
+{
+  "experiment": {
+    "name": "two_stage_ewc_pilot",
+    "method": "ewc",
+    "seed": 4,
+    "outer_fold": 3
+  },
+  "stages": [
+    {"id": 1, "start_year": 2010, "end_year": 2012},
+    {"id": 2, "start_year": 2013, "end_year": 2014}
+  ],
+  "model": {
+    "attention": true,
+    "image_size": 256,
+    "num_classes": 2
+  },
+  "training": {
+    "epochs_per_stage": 1,
+    "batch_size": 2,
+    "max_batches_per_epoch": 4,
+    "num_workers": 0,
+    "augment_positive": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.5,
+    "lr_halving_period_epochs": 3,
+    "threshold": 0.5
+  },
+  "ewc": {
+    "variant": "classic_multi_anchor",
+    "lambda": 10.0,
+    "fisher_kind": "empirical_true_label",
+    "fisher_distribution": "class_balanced",
+    "fisher_loader_batch_size": 1,
+    "maximum_total_fisher_examples": 4
+  },
+  "data": {
+    "description": "Synthetic software smoke test; replace with real HMI images for science"
+  },
+  "paths": {
+    "manifest_dir": "data/manifests/fold3_pilot",
+    "image_root": "data/demo_images",
+    "run_dir": "runs/pilot_ewc"
+  }
+}

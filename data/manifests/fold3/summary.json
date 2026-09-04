@@ -1,0 +1,84 @@
+{
+  "outer_fold": 3,
+  "seed": 4,
+  "source": {
+    "train": "/Users/piyushluitel/Desktop/PhD/Research/fulldiskattention/data_labeling/data_labels/simplified_data_labels/Fold3_train.csv",
+    "train_sha256": "f4f9d94887652dfd6c579ea7673262de1d227b375e8b37ba0d479480f343d28d",
+    "eval": "/Users/piyushluitel/Desktop/PhD/Research/fulldiskattention/data_labeling/data_labels/simplified_data_labels/Fold3_val.csv",
+    "eval_sha256": "6ce42c1cd70c1ae7b747354f780dc7e97aadc6f97aa5479cf9d40e58e59a474d"
+  },
+  "stages": {
+    "1": {
+      "years": [
+        2010,
+        2012
+      ],
+      "source_train_pool": {
+        "total": 9421,
+        "nf": 7910,
+        "fl": 1511
+      },
+      "source_eval_pool": {
+        "total": 4184,
+        "nf": 3102,
+        "fl": 1082
+      },
+      "written_train": {
+        "total": 9421,
+        "nf": 7910,
+        "fl": 1511
+      },
+      "written_eval": {
+        "total": 4184,
+        "nf": 3102,
+        "fl": 1082
+      },
+      "written_fisher": {
+        "total": 128,
+        "nf": 64,
+        "fl": 64
+      },
+      "files": {
+        "stage1_train.csv": "8753142bad8cf7c34ce7c63943400d4c2649c99cfa28536c63eb49faa675789e",
+        "stage1_eval.csv": "fb790526b4bbd75a73157c099fd7283a06b6423e0fa1488b4e5342dd0478fd81",
+        "stage1_fisher.csv": "c9ee439d5c85182483e068a428f07342c3531ef8ae61647855ba3d1279069837"
+      }
+    },
+    "2": {
+      "years": [
+        2013,
+        2014
+      ],
+      "source_train_pool": {
+        "total": 12026,
+        "nf": 8412,
+        "fl": 3614
+      },
+      "source_eval_pool": {
+        "total": 4039,
+        "nf": 3513,
+        "fl": 526
+      },
+      "written_train": {
+        "total": 12026,
+        "nf": 8412,
+        "fl": 3614
+      },
+      "written_eval": {
+        "total": 4039,
+        "nf": 3513,
+        "fl": 526
+      },
+      "written_fisher": {
+        "total": 128,
+        "nf": 64,
+        "fl": 64
+      },
+      "files": {
+        "stage2_train.csv": "57ceaef7b4f39cf47fe518d84b5351b0c801bc1ccec0f9fb54f31ae98536030a",
+        "stage2_eval.csv": "ce1e25d3abbbbcc74bcdfa2f6a12f125f2f6a7810e8cacb25fa8231f8caec8d4",
+        "stage2_fisher.csv": "c67e38148dcf31ba608f895e5492dfb5de3e9d974855e810f677d8f29fb1c5a8"
+      }
+    }
+  }
+}
