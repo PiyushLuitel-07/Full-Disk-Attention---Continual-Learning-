@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+data/hmi_jpgs_512/
+data/jp2/
+runs/
+
+*.pt

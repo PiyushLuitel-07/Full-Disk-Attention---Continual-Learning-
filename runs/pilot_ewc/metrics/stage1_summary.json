@@ -1,0 +1,32 @@
+{
+  "trained_through_stage": 1,
+  "method": "ewc",
+  "device": "cuda",
+  "train_examples_in_manifest": 8,
+  "epochs": 1,
+  "max_batches_per_epoch": 4,
+  "ewc_was_active": false,
+  "ewc_lambda": 10.0,
+  "evaluations": {
+    "stage1": {
+      "n": 8,
+      "n_fl": 4,
+      "n_nf": 4,
+      "tp": 4,
+      "fp": 4,
+      "tn": 0,
+      "fn": 0,
+      "accuracy": 0.5,
+      "recall": 1.0,
+      "precision": 0.5,
+      "fpr": 1.0,
+      "tss": 0.0,
+      "hss": 0.0,
+      "ce_loss": 0.6949478536844254
+    }
+  },
+  "fisher_examples": 4,
+  "checkpoint": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/runs/pilot_ewc/checkpoints/stage1.pt",
+  "ewc_state": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/runs/pilot_ewc/ewc/through_stage1.pt",
+  "elapsed_seconds": 0.5271637439727783
+}

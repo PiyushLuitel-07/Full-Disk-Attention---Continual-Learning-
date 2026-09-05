@@ -1,0 +1,16 @@
+{
+  "command": [
+    "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/modeling/train_continual.py",
+    "--config",
+    "configs/pilot.json",
+    "--stage",
+    "2"
+  ],
+  "config_path": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/configs/pilot.json",
+  "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+  "platform": "Linux-6.8.0-55-generic-x86_64-with-glibc2.39",
+  "torch": "2.14.0+cu130",
+  "torchvision": "0.29.0+cu130",
+  "device": "cuda",
+  "cuda_version": "13.0"
+}

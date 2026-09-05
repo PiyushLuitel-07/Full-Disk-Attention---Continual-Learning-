@@ -38,7 +38,7 @@
   },
   "paths": {
     "manifest_dir": "data/manifests/fold3_pilot",
-    "image_root": "data/demo_images",
+    "image_root": "data/hmi_jpgs_512",
     "run_dir": "runs/pilot_ewc"
   }
 }
