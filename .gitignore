@@ -218,6 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 data/hmi_jpgs_512/
+
+# Weights & Biases local cache; runs are uploaded to the configured W&B project.
+wandb/
 data/jp2/
 runs/
 

@@ -36,6 +36,17 @@
   "data": {
     "description": "Synthetic software smoke test; replace with real HMI images for science"
   },
+  "tracking": {
+    "enabled": true,
+    "entity": "piyush-luitel-texas-christian-university",
+    "project": "Full disk attention solar flare prediction with continual learning",
+    "mode": "online",
+    "group": null,
+    "tags": ["continual-learning", "ewc", "pilot"],
+    "notes": "Synthetic smoke test; metrics are not scientific results.",
+    "save_code": true,
+    "log_artifacts": true
+  },
   "paths": {
     "manifest_dir": "data/manifests/fold3_pilot",
     "image_root": "data/hmi_jpgs_512",

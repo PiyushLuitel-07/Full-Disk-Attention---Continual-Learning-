@@ -39,6 +39,7 @@ from .dataset import (
 )
 from .ewc import EWCState, estimate_diagonal_fisher
 from .metrics import binary_metrics, predictions_from_probabilities
+from .tracking import WandbTracker
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -65,7 +66,16 @@ def project_path(value: str | Path) -> Path:
 def load_config(path: Path) -> dict[str, Any]:
     with project_path(path).open(encoding="utf-8") as handle:
         config = json.load(handle)
-    required_sections = {"experiment", "stages", "model", "training", "ewc", "data", "paths"}
+    required_sections = {
+        "experiment",
+        "stages",
+        "model",
+        "training",
+        "ewc",
+        "data",
+        "paths",
+        "tracking",
+    }
     missing = required_sections - set(config)
     if missing:
         raise ValueError(f"Configuration is missing sections: {sorted(missing)}")
@@ -73,6 +83,13 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("This focused implementation expects exactly stages 1 and 2")
     if config["experiment"]["method"] not in {"ewc", "finetune"}:
         raise ValueError("experiment.method must be 'ewc' or 'finetune'")
+    tracking = config["tracking"]
+    if tracking.get("enabled", False):
+        missing_tracking = {"entity", "project"} - set(tracking)
+        if missing_tracking:
+            raise ValueError(
+                f"Enabled W&B tracking is missing settings: {sorted(missing_tracking)}"
+            )
     return config
 
 
@@ -299,6 +316,8 @@ def main() -> None:
             "to preserve provenance."
         )
 
+    tracker = WandbTracker.start(config, stage, str(device))
+
     model = AttnNet(
         num_classes=int(config["model"]["num_classes"]),
         attention=bool(config["model"]["attention"]),
@@ -373,6 +392,7 @@ def main() -> None:
             **epoch_result,
         }
         history.append(epoch_result)
+        tracker.log_training_epoch(stage, epoch_result)
         scheduler.step()
         print(
             f"epoch={epoch} ce={epoch_result['ce_loss']:.4f} "
@@ -398,6 +418,7 @@ def main() -> None:
             model, eval_loader, criterion, threshold, device
         )
         evaluations[f"stage{evaluated_stage}"] = result
+        tracker.log_evaluation(stage, evaluated_stage, result, prediction_rows)
         write_predictions(
             run_dir
             / "predictions"
@@ -471,10 +492,10 @@ def main() -> None:
         "elapsed_seconds": checkpoint["elapsed_seconds"],
     }
     write_json(run_dir / "metrics" / f"stage{stage}_summary.json", summary)
-    write_json(
-        run_dir / "ewc" / f"stage{stage}_fisher_summary.json",
-        fisher_summary(fisher, fisher_count),
-    )
+    fisher_result = fisher_summary(fisher, fisher_count)
+    write_json(run_dir / "ewc" / f"stage{stage}_fisher_summary.json", fisher_result)
+    tracker.log_fisher(stage, fisher_result)
+    tracker.log_stage_summary(summary)
 
     provenance_path = run_dir / f"provenance_stage{stage}.json"
     provenance = {
@@ -488,6 +509,8 @@ def main() -> None:
         "cuda_version": torch.version.cuda,
     }
     write_json(provenance_path, provenance)
+    tracker.log_run_artifact(stage, run_dir, project_path(args.config))
+    tracker.finish()
     print(f"Finished Stage {stage}. Summary: {run_dir / 'metrics' / f'stage{stage}_summary.json'}")
 
 

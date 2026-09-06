@@ -36,6 +36,7 @@ Added for continual learning:
 - stage-by-stage checkpoints and all-seen-stage evaluation;
 - safe one-class metrics, JSON/CSV logs, provenance, and bounded downloads;
 - CPU, one-GPU, and normal project-environment support.
+- complete Stage 1/2 experiment tracking in Weights & Biases.
 
 Fold 3 is the pilot default because it remains useful in later low-activity
 years. A publication experiment should eventually repeat the locked setup over
@@ -99,6 +100,38 @@ What to notice:
 3. Stage 2 prints `EWC active=True` and logs a separate weighted EWC term.
 4. Stage 2 evaluates both the old 2010–2012 set and new 2013–2014 set.
 5. `summarize_run.py` shows retention: Stage 1 TSS before and after Stage 2.
+
+## Weights & Biases experiment tracking
+
+Both supplied configurations enable W&B. Stage 1 and Stage 2 are logged as
+separate runs in one group, so the two commands remain independent while the
+continual sequence stays together in the W&B project. Each stage logs:
+
+- learning rate and training CE, EWC, total-loss, TSS/HSS and confusion metrics
+  for every epoch;
+- held-out evaluation metrics and a confusion-matrix chart;
+- Fisher coverage, importance statistics and a per-parameter Fisher table;
+- the complete experiment configuration, runtime metadata and elapsed time;
+- one versioned artifact containing checkpoints, EWC state, histories,
+  predictions and provenance through the completed stage.
+
+Authenticate once on NOVA inside your account:
+
+```bash
+wandb login
+```
+
+Do not put the API key in a JSON file, shell script, Git commit, or README. W&B
+uses the credentials already stored by `wandb login`. The configured entity and
+project are:
+
+```text
+piyush-luitel-texas-christian-university
+Full disk attention solar flare prediction with continual learning
+```
+
+The local `wandb/` cache is ignored by Git. Set `tracking.mode` to `offline`
+only when NOVA cannot reach W&B; later upload such a run with `wandb sync`.
 
 The pilot deliberately processes only two training batches and four Fisher
 examples per stage. Its scores are unstable and scientifically meaningless.

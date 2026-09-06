@@ -36,10 +36,20 @@
   "data": {
     "description": "Real HMI experiment; tune only after the pipeline is verified"
   },
+  "tracking": {
+    "enabled": true,
+    "entity": "piyush-luitel-texas-christian-university",
+    "project": "Full disk attention solar flare prediction with continual learning",
+    "mode": "online",
+    "group": null,
+    "tags": ["continual-learning", "ewc", "real-hmi"],
+    "notes": "Two-stage chronological HMI continual-learning experiment.",
+    "save_code": true,
+    "log_artifacts": true
+  },
   "paths": {
     "manifest_dir": "data/manifests/fold3",
     "image_root": "/CHANGE/THIS/TO/hmi_jpgs_512",
     "run_dir": "runs/fold3_seed4_ewc_lambda10"
   }
 }
-
