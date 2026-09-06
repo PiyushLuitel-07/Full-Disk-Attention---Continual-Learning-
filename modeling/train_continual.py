@@ -303,21 +303,28 @@ def main() -> None:
     stage = args.stage
     seed = int(config["experiment"]["seed"])
     method = config["experiment"]["method"]
-    seed_everything(seed)
     device = select_device(args.device)
 
     manifest_dir = project_path(config["paths"]["manifest_dir"])
     image_root = project_path(config["paths"]["image_root"])
     run_dir = project_path(args.run_dir or config["paths"]["run_dir"])
     checkpoint_path = run_dir / "checkpoints" / f"stage{stage}.pt"
-    ewc_path = run_dir / "ewc" / f"through_stage{stage}.pt"
-    if checkpoint_path.exists() or ewc_path.exists():
+    ewc_path = (
+        run_dir / "ewc" / f"through_stage{stage}.pt" if method == "ewc" else None
+    )
+    output_exists = checkpoint_path.exists() or (
+        ewc_path is not None and ewc_path.exists()
+    )
+    if output_exists:
         raise FileExistsError(
             f"Stage {stage} output already exists in {run_dir}. Use a new run directory "
             "to preserve provenance."
         )
 
     tracker = WandbTracker.start(config, stage, str(device))
+    # Seed after external tracking initialization so EWC and fine-tuning begin
+    # from identical RNG states even if the tracking SDK uses randomness.
+    seed_everything(seed)
 
     model = AttnNet(
         num_classes=int(config["model"]["num_classes"]),
@@ -327,27 +334,33 @@ def main() -> None:
     previous_stage_summary: dict[str, Any] | None = None
     if stage > 1:
         previous_checkpoint = run_dir / "checkpoints" / f"stage{stage - 1}.pt"
-        previous_ewc = run_dir / "ewc" / f"through_stage{stage - 1}.pt"
+        previous_ewc = (
+            run_dir / "ewc" / f"through_stage{stage - 1}.pt"
+            if method == "ewc"
+            else None
+        )
         previous_summary = run_dir / "metrics" / f"stage{stage - 1}_summary.json"
         if not (
             previous_checkpoint.is_file()
-            and previous_ewc.is_file()
             and previous_summary.is_file()
+            and (previous_ewc is None or previous_ewc.is_file())
         ):
+            expected_ewc = f", {previous_ewc}" if previous_ewc is not None else ""
             raise FileNotFoundError(
                 f"Train Stage {stage - 1} first. Expected {previous_checkpoint}, "
-                f"{previous_ewc}, and {previous_summary}"
+                f"{previous_summary}{expected_ewc}"
             )
         checkpoint = load_torch(previous_checkpoint, device)
         if checkpoint.get("config") != config:
             raise ValueError(
                 "The Stage 2 configuration differs from Stage 1. Use the same "
                 "configuration for one continual sequence, or start a new run directory."
-            )
+        )
         model.load_state_dict(checkpoint["model_state_dict"], strict=True)
-        ewc_state = EWCState.from_state_dict(
-            load_torch(previous_ewc, torch.device("cpu"))
-        ).to(device)
+        if previous_ewc is not None:
+            ewc_state = EWCState.from_state_dict(
+                load_torch(previous_ewc, torch.device("cpu"))
+            ).to(device)
         previous_stage_summary = json.loads(previous_summary.read_text(encoding="utf-8"))
         if "stage2" not in previous_stage_summary.get("evaluations", {}):
             raise ValueError(
@@ -450,36 +463,45 @@ def main() -> None:
             f"tn={result['tn']} fn={result['fn']}"
         )
 
-    # Consolidation uses deterministic, unaugmented, class-balanced rows only.
-    fisher_samples = read_manifest(manifest_dir / f"stage{stage}_fisher.csv")
-    validate_stage_years(fisher_samples, config, stage)
-    fisher_dataset = MagnetogramDataset(
-        fisher_samples,
-        image_root,
-        int(config["model"]["image_size"]),
-        augment_positive=False,
-    )
-    fisher_loader = make_ordered_loader(
-        fisher_dataset,
-        int(config["ewc"]["fisher_loader_batch_size"]),
-        workers,
-        pin_memory,
-    )
-    print(f"Estimating Stage {stage} empirical Fisher from {len(fisher_samples)} rows...")
-    maximum_fisher = int(config["ewc"]["maximum_total_fisher_examples"])
-    if maximum_fisher and maximum_fisher < len(fisher_samples):
-        raise ValueError(
-            "maximum_total_fisher_examples would truncate the time-sorted Fisher "
-            "manifest and break its class balance. Regenerate a smaller balanced "
-            "Fisher manifest instead."
+    fisher_count = 0
+    fisher_result: dict[str, Any] | None = None
+    if method == "ewc":
+        # Consolidation uses deterministic, unaugmented, class-balanced rows only.
+        fisher_samples = read_manifest(manifest_dir / f"stage{stage}_fisher.csv")
+        validate_stage_years(fisher_samples, config, stage)
+        fisher_dataset = MagnetogramDataset(
+            fisher_samples,
+            image_root,
+            int(config["model"]["image_size"]),
+            augment_positive=False,
         )
-    fisher, fisher_count = estimate_diagonal_fisher(
-        model,
-        fisher_loader,
-        device,
-        max_samples=0,
-    )
-    ewc_state.add_stage(model, fisher)
+        fisher_loader = make_ordered_loader(
+            fisher_dataset,
+            int(config["ewc"]["fisher_loader_batch_size"]),
+            workers,
+            pin_memory,
+        )
+        print(
+            f"Estimating Stage {stage} empirical Fisher from "
+            f"{len(fisher_samples)} rows..."
+        )
+        maximum_fisher = int(config["ewc"]["maximum_total_fisher_examples"])
+        if maximum_fisher and maximum_fisher < len(fisher_samples):
+            raise ValueError(
+                "maximum_total_fisher_examples would truncate the time-sorted Fisher "
+                "manifest and break its class balance. Regenerate a smaller balanced "
+                "Fisher manifest instead."
+            )
+        fisher, fisher_count = estimate_diagonal_fisher(
+            model,
+            fisher_loader,
+            device,
+            max_samples=0,
+        )
+        ewc_state.add_stage(model, fisher)
+        fisher_result = fisher_summary(fisher, fisher_count)
+    else:
+        print("Skipping Fisher estimation because method=finetune")
 
     continual_result: dict[str, Any] | None = None
     if stage == 2:
@@ -503,7 +525,8 @@ def main() -> None:
         "elapsed_seconds": time.time() - start_time,
     }
     atomic_torch_save(checkpoint, checkpoint_path)
-    atomic_torch_save(ewc_state.state_dict(), ewc_path)
+    if ewc_path is not None:
+        atomic_torch_save(ewc_state.state_dict(), ewc_path)
     append_history(run_dir / "metrics" / "history.csv", history)
     summary = {
         "trained_through_stage": stage,
@@ -513,12 +536,12 @@ def main() -> None:
         "epochs": int(training["epochs_per_stage"]),
         "max_batches_per_epoch": int(training["max_batches_per_epoch"]),
         "ewc_was_active": use_ewc,
-        "ewc_lambda": float(config["ewc"]["lambda"]),
+        "ewc_lambda": float(config["ewc"]["lambda"]) if method == "ewc" else 0.0,
         "evaluations": evaluations,
         "continual_metrics": continual_result,
         "fisher_examples": fisher_count,
         "checkpoint": str(checkpoint_path),
-        "ewc_state": str(ewc_path),
+        "ewc_state": str(ewc_path) if ewc_path is not None else None,
         "elapsed_seconds": checkpoint["elapsed_seconds"],
     }
     write_json(run_dir / "metrics" / f"stage{stage}_summary.json", summary)
@@ -528,14 +551,25 @@ def main() -> None:
             "method": method,
             "seed": seed,
             "outer_fold": int(config["experiment"]["outer_fold"]),
-            "ewc_lambda": float(config["ewc"]["lambda"]),
+            "ewc_lambda": float(config["ewc"]["lambda"]) if method == "ewc" else 0.0,
+            "comparison_controls": {
+                "seed": seed,
+                "outer_fold": int(config["experiment"]["outer_fold"]),
+                "stages": config["stages"],
+                "model": config["model"],
+                "training": config["training"],
+                "manifest_dir": config["paths"]["manifest_dir"],
+                "image_root": config["paths"]["image_root"],
+            },
             **continual_result,
         }
         write_json(run_dir / "metrics" / "continual_summary.json", continual_summary)
         tracker.log_continual_metrics(continual_summary)
-    fisher_result = fisher_summary(fisher, fisher_count)
-    write_json(run_dir / "ewc" / f"stage{stage}_fisher_summary.json", fisher_result)
-    tracker.log_fisher(stage, fisher_result)
+    if fisher_result is not None:
+        write_json(
+            run_dir / "ewc" / f"stage{stage}_fisher_summary.json", fisher_result
+        )
+        tracker.log_fisher(stage, fisher_result)
     tracker.log_stage_summary(summary)
 
     provenance_path = run_dir / f"provenance_stage{stage}.json"

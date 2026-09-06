@@ -114,6 +114,15 @@ stability/plasticity trade-off:
 The supplied `lambda=10` is only a smoke-test setting. It must not be presented
 as scientifically selected.
 
+### Matched fine-tuning control
+
+When `experiment.method` is `finetune`, Stage 1 and Stage 2 use the identical
+model, chronological data, seed, optimizer, augmentation, and training budget.
+Stage 2 still loads the Stage 1 checkpoint, but the EWC penalty is disabled.
+Because Fisher information cannot influence this baseline, the trainer skips
+Fisher estimation and does not save an EWC state. This makes fine-tuning the
+direct control needed to determine whether EWC actually reduces forgetting.
+
 ## 7. Evaluation measures both learning and forgetting
 
 After Stage 2, the model is evaluated independently on:
@@ -151,4 +160,3 @@ that scientific question; it only proves that the mechanism executes.
 - provenance: records the command and software/device versions.
 
 No output from the original repository is overwritten.
-

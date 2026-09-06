@@ -93,6 +93,28 @@ python -m modeling.train_continual \
 python tools/summarize_run.py --run-dir runs/pilot_ewc
 ```
 
+Run the matched no-EWC pilot with the same data, seed, model, and training
+budget:
+
+```bash
+python -m modeling.train_continual \
+  --config configs/pilot_finetune.json \
+  --stage 1
+
+python -m modeling.train_continual \
+  --config configs/pilot_finetune.json \
+  --stage 2
+
+python tools/compare_methods.py \
+  --ewc-run-dir runs/pilot_ewc \
+  --finetune-run-dir runs/pilot_finetune
+```
+
+The fine-tuning baseline loads its Stage 1 checkpoint and learns Stage 2 in the
+same order, but applies no EWC penalty and performs no Fisher estimation. The
+comparison command refuses to compare runs if their stage definitions, model,
+training settings, manifests, image root, fold, or seed differ.
+
 What to notice:
 
 1. Stage 1 prints `EWC active=False` because no older task exists.
@@ -204,12 +226,16 @@ attempts an open-ended multi-year 12-minute-cadence download.
 
 ## First real Stage 1 and Stage 2 run
 
-Copy the server template to an untracked working config and edit only the paths
-and initial training budget:
+Copy both server templates to untracked working configurations:
 
 ```bash
-cp configs/server_template.json configs/server.json
+cp configs/server_template.json configs/server_ewc.json
+cp configs/server_finetune_template.json configs/server_finetune.json
 ```
+
+Make the same image-path and training-budget edits in both files. Keep separate
+run directories. The comparison tool verifies the controlled settings before
+reporting any EWC benefit.
 
 Recommended first intuition run:
 
@@ -225,7 +251,7 @@ Train Stage 1 first:
 
 ```bash
 python -m modeling.train_continual \
-  --config configs/server.json \
+  --config configs/server_ewc.json \
   --stage 1 \
   --device cuda
 ```
@@ -234,13 +260,26 @@ Inspect `runs/<run>/metrics/stage1_summary.json` and the Fisher summary. Then:
 
 ```bash
 python -m modeling.train_continual \
-  --config configs/server.json \
+  --config configs/server_ewc.json \
   --stage 2 \
   --device cuda
 ```
 
 Stage 2 loads only the previous-stage artifacts in the same run directory.
 Its training rows are 2013–2014 only. Old images are not replayed.
+
+Then run the same two commands with `configs/server_finetune.json`. After both
+sequences finish:
+
+```bash
+python tools/compare_methods.py \
+  --ewc-run-dir runs/fold3_seed4_ewc_lambda10 \
+  --finetune-run-dir runs/fold3_seed4_finetune
+```
+
+`forgetting_reduction = finetune_forgetting - EWC_forgetting`; a positive value
+favors EWC. Always inspect `stage2_performance_difference` alongside it because
+retention is not useful if EWC prevents learning the new stage.
 
 ## Running on NOVA safely
 
@@ -310,6 +349,7 @@ runs/<run>/
 ├── metrics/history.csv
 ├── metrics/stage*_summary.json
 ├── metrics/continual_summary.json
+├── metrics/ewc_vs_finetune.json    # created by the comparison command
 ├── predictions/after_stage*_eval_stage*.csv
 └── provenance_stage*.json
 ```
@@ -359,8 +399,9 @@ This small project is a clear starting point, not the final thesis experiment:
 - Fold 3 is only a debugging fold;
 - hourly targets overlap and inherit the paper's boundary-correlation issue;
 - EWC protects trainable BatchNorm scale/bias, not its running buffers;
-- final claims require naive fine-tuning and joint/offline comparisons, all four
-  folds, and multiple seeds.
+- final claims require the matched naive fine-tuning comparison, all four folds,
+  and multiple seeds. Joint/offline training is intentionally outside the
+  current project scope.
 
 Keep this code stable until the two-stage real-data run is understood. Then add
 the later stages or baselines as separate, deliberate experiments.
