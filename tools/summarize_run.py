@@ -1,10 +1,36 @@
-"""Print the two-stage TSS/HSS retention table from one run directory."""
+"""Print the complete two-stage TSS/HSS evaluation matrix and forgetting."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+from typing import Any
+
+
+def format_summary(summaries: dict[int, dict[str, Any]]) -> list[str]:
+    """Return CSV lines for the complete two-stage metric matrix."""
+
+    lines = [
+        "metric,after_stage1_eval_stage1,after_stage1_eval_stage2,"
+        "after_stage2_eval_stage1,after_stage2_eval_stage2"
+    ]
+    for metric in ("tss", "hss"):
+        first = summaries.get(1, {}).get("evaluations", {}).get("stage1", {}).get(metric, "")
+        future_before_learning = (
+            summaries.get(1, {})
+            .get("evaluations", {})
+            .get("stage2", {})
+            .get(metric, "")
+        )
+        old_after_new = summaries.get(2, {}).get("evaluations", {}).get("stage1", {}).get(metric, "")
+        current = summaries.get(2, {}).get("evaluations", {}).get("stage2", {}).get(metric, "")
+        lines.append(
+            f"{metric},{first},{future_before_learning},{old_after_new},{current}"
+        )
+        if isinstance(first, (int, float)) and isinstance(old_after_new, (int, float)):
+            lines.append(f"{metric}_forgetting,{first - old_after_new}")
+    return lines
 
 
 def main() -> None:
@@ -19,16 +45,8 @@ def main() -> None:
 
     if not summaries:
         raise FileNotFoundError(f"No stage summaries found below {args.run_dir}")
-    print("metric,after_stage1_eval_stage1,after_stage2_eval_stage1,after_stage2_eval_stage2")
-    for metric in ("tss", "hss"):
-        first = summaries.get(1, {}).get("evaluations", {}).get("stage1", {}).get(metric, "")
-        old_after_new = summaries.get(2, {}).get("evaluations", {}).get("stage1", {}).get(metric, "")
-        current = summaries.get(2, {}).get("evaluations", {}).get("stage2", {}).get(metric, "")
-        print(f"{metric},{first},{old_after_new},{current}")
-        if isinstance(first, (int, float)) and isinstance(old_after_new, (int, float)):
-            print(f"{metric}_forgetting,{first - old_after_new}")
+    print("\n".join(format_summary(summaries)))
 
 
 if __name__ == "__main__":
     main()
-

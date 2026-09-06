@@ -98,8 +98,11 @@ What to notice:
 1. Stage 1 prints `EWC active=False` because no older task exists.
 2. Fisher estimation runs after Stage 1 and saves the parameter importance.
 3. Stage 2 prints `EWC active=True` and logs a separate weighted EWC term.
-4. Stage 2 evaluates both the old 2010–2012 set and new 2013–2014 set.
-5. `summarize_run.py` shows retention: Stage 1 TSS before and after Stage 2.
+4. Both checkpoints are evaluated on both chronological evaluation sets.
+5. The Stage 1 checkpoint's Stage 2 result is a zero-shot measurement only;
+   Stage 2 images do not update the Stage 1 model.
+6. `summarize_run.py` prints the complete two-stage TSS/HSS matrix and
+   Stage 1 retention after Stage 2.
 
 ## Weights & Biases experiment tracking
 
@@ -312,8 +315,20 @@ runs/<run>/
 
 - `history.csv` separates CE, raw EWC, weighted EWC, and total loss.
 - `through_stage1.pt` contains Stage 1 anchors and Fisher diagonals.
-- Stage 2 prediction files let you recompute every confusion matrix.
+- The four checkpoint/evaluation prediction files let you recompute every
+  entry in the two-stage evaluation matrix.
 - forgetting after Stage 2 is `Stage1_TSS_after_stage1 - Stage1_TSS_after_stage2`.
+
+The complete matrix is:
+
+```text
+                              evaluate 2010–2012   evaluate 2013–2014
+checkpoint after Stage 1             R_1,1                 R_1,2
+checkpoint after Stage 2             R_2,1                 R_2,2
+```
+
+`R_1,2` measures zero-shot performance before Stage 2 learning. It is recorded
+for forward-transfer analysis but is never used to train Stage 1.
 
 Classic EWC stores one anchor and one Fisher value per parameter. For this
 roughly 7.5-million-parameter model, Stage 1 EWC state is around 60 MB in

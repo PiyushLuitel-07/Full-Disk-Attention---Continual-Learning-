@@ -402,7 +402,12 @@ def main() -> None:
 
     threshold = float(training["threshold"])
     evaluations: dict[str, Any] = {}
-    for evaluated_stage in range(1, stage + 1):
+    # Evaluate every chronological period after every checkpoint. In particular,
+    # after Stage 1 this records R_1,2: zero-shot performance on 2013--2014
+    # before any Stage 2 optimization. Evaluation runs under inference_mode and
+    # never contributes gradients, Fisher values, or checkpoint selection.
+    evaluation_stage_ids = [item["id"] for item in config["stages"]]
+    for evaluated_stage in evaluation_stage_ids:
         eval_samples = read_manifest(manifest_dir / f"stage{evaluated_stage}_eval.csv")
         validate_stage_years(eval_samples, config, evaluated_stage)
         eval_dataset = MagnetogramDataset(
