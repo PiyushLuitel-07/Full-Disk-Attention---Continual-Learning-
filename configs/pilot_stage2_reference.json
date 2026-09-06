@@ -1,0 +1,56 @@
+{
+  "experiment": {
+    "name": "stage2_only_reference_pilot",
+    "method": "stage2_only",
+    "seed": 4,
+    "outer_fold": 3
+  },
+  "stages": [
+    {"id": 1, "start_year": 2010, "end_year": 2012},
+    {"id": 2, "start_year": 2013, "end_year": 2014}
+  ],
+  "model": {
+    "attention": true,
+    "image_size": 256,
+    "num_classes": 2
+  },
+  "training": {
+    "epochs_per_stage": 1,
+    "batch_size": 2,
+    "max_batches_per_epoch": 4,
+    "num_workers": 0,
+    "augment_positive": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.5,
+    "lr_halving_period_epochs": 3,
+    "threshold": 0.5
+  },
+  "ewc": {
+    "variant": "not_used_for_stage2_only",
+    "lambda": 0.0,
+    "fisher_kind": "not_used_for_stage2_only",
+    "fisher_distribution": "not_used_for_stage2_only",
+    "fisher_loader_batch_size": 1,
+    "maximum_total_fisher_examples": 0
+  },
+  "data": {
+    "description": "Synthetic Stage-2-only smoke test; metrics are not scientific results"
+  },
+  "tracking": {
+    "enabled": true,
+    "entity": "piyush-luitel-texas-christian-university",
+    "project": "Full disk attention solar flare prediction with continual learning",
+    "mode": "online",
+    "group": null,
+    "tags": ["continual-learning", "stage2-only", "forward-transfer", "pilot"],
+    "notes": "Random-initialization Stage-2 reference and forward-transfer smoke test.",
+    "save_code": true,
+    "log_artifacts": true
+  },
+  "paths": {
+    "manifest_dir": "data/manifests/fold3_pilot",
+    "image_root": "data/hmi_jpgs_512",
+    "run_dir": "runs/pilot_stage2_only",
+    "source_continual_run_dir": "runs/pilot_ewc"
+  }
+}

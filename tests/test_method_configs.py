@@ -24,15 +24,15 @@ def controls(config: dict) -> dict:
 
 class MethodConfigTests(unittest.TestCase):
     def test_pilot_configs_are_matched(self) -> None:
-        self.assertEqual(
-            controls(load("pilot.json")),
-            controls(load("pilot_finetune.json")),
-        )
+        expected = controls(load("pilot.json"))
+        self.assertEqual(expected, controls(load("pilot_finetune.json")))
+        self.assertEqual(expected, controls(load("pilot_stage2_reference.json")))
 
     def test_server_templates_are_matched(self) -> None:
+        expected = controls(load("server_template.json"))
+        self.assertEqual(expected, controls(load("server_finetune_template.json")))
         self.assertEqual(
-            controls(load("server_template.json")),
-            controls(load("server_finetune_template.json")),
+            expected, controls(load("server_stage2_reference_template.json"))
         )
 
 

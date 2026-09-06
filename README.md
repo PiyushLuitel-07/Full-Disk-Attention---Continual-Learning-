@@ -37,6 +37,7 @@ Added for continual learning:
 - safe one-class metrics, JSON/CSV logs, provenance, and bounded downloads;
 - CPU, one-GPU, and normal project-environment support.
 - complete Stage 1/2 experiment tracking in Weights & Biases.
+- a matched Stage-2-only reference and standard forward-transfer measurement.
 
 Fold 3 is the pilot default because it remains useful in later low-activity
 years. A publication experiment should eventually repeat the locked setup over
@@ -115,6 +116,23 @@ same order, but applies no EWC penalty and performs no Fisher estimation. The
 comparison command refuses to compare runs if their stage definitions, model,
 training settings, manifests, image root, fold, or seed differ.
 
+After the EWC Stage 1 run exists, run the Stage-2-only pilot once:
+
+```bash
+python -m modeling.train_continual \
+  --config configs/pilot_stage2_reference.json \
+  --stage 2
+
+cat runs/pilot_stage2_only/metrics/forward_transfer_summary.json
+```
+
+This command never loads Stage 1 model weights. It first evaluates the random
+model on Stage 2 to obtain `b_2`, trains only with 2013–2014 rows, and evaluates
+the trained reference. It reads the EWC Stage 1 summary only to obtain `R_1,2`
+and verifies that the seed, data, model, and training controls match. Standard
+forward transfer is `FWT = R_1,2 - b_2`; the trained Stage-2-only score is
+reported separately and is not substituted for `b_2`.
+
 What to notice:
 
 1. Stage 1 prints `EWC active=False` because no older task exists.
@@ -128,9 +146,10 @@ What to notice:
 
 ## Weights & Biases experiment tracking
 
-Both supplied configurations enable W&B. Stage 1 and Stage 2 are logged as
-separate runs in one group, so the two commands remain independent while the
-continual sequence stays together in the W&B project. Each stage logs:
+All supplied experiment configurations enable W&B. Stage 1 and Stage 2 are
+logged as separate runs in one group, so the two commands remain independent
+while the continual sequence stays together in the W&B project. Each stage
+logs:
 
 - learning rate and training CE, EWC, total-loss, TSS/HSS and confusion metrics
   for every epoch;
@@ -231,11 +250,13 @@ Copy both server templates to untracked working configurations:
 ```bash
 cp configs/server_template.json configs/server_ewc.json
 cp configs/server_finetune_template.json configs/server_finetune.json
+cp configs/server_stage2_reference_template.json configs/server_stage2_reference.json
 ```
 
-Make the same image-path and training-budget edits in both files. Keep separate
-run directories. The comparison tool verifies the controlled settings before
-reporting any EWC benefit.
+Make the same image-path and training-budget edits in all three files. Keep
+separate run directories. In the Stage-2 reference config,
+`source_continual_run_dir` must point to the EWC run. The code verifies the
+controlled settings before reporting EWC or forward-transfer results.
 
 Recommended first intuition run:
 
@@ -280,6 +301,22 @@ python tools/compare_methods.py \
 `forgetting_reduction = finetune_forgetting - EWC_forgetting`; a positive value
 favors EWC. Always inspect `stage2_performance_difference` alongside it because
 retention is not useful if EWC prevents learning the new stage.
+
+Finally run the reference directly at Stage 2; there is no Stage 1 command for
+this method:
+
+```bash
+python -m modeling.train_continual \
+  --config configs/server_stage2_reference.json \
+  --stage 2 \
+  --device cuda
+
+cat runs/fold3_seed4_stage2_only/metrics/forward_transfer_summary.json
+```
+
+This is a separate training run on NOVA. It uses only Stage 2 training images,
+creates no Fisher state, and logs the random baseline, training curves, final
+Stage 2 evaluation, and TSS/HSS forward transfer to W&B.
 
 ## Running on NOVA safely
 
@@ -350,7 +387,9 @@ runs/<run>/
 ├── metrics/stage*_summary.json
 ├── metrics/continual_summary.json
 ├── metrics/ewc_vs_finetune.json    # created by the comparison command
+├── metrics/forward_transfer_summary.json  # Stage-2-only reference run
 ├── predictions/after_stage*_eval_stage*.csv
+├── predictions/random_init_eval_stage2.csv
 └── provenance_stage*.json
 ```
 
@@ -382,6 +421,14 @@ following separately for TSS and HSS:
   two-stage experiment;
 - `stage2_gain = R_2,2 - R_1,2`, improvement from zero-shot prediction to the
   trained Stage 2 checkpoint.
+
+The Stage-2-only reference additionally reports:
+
+- `b_2`: random-initialization performance on the Stage 2 evaluation rows;
+- `forward_transfer = R_1,2 - b_2`, where positive means Stage 1 learning
+  improved Stage 2 performance before Stage 2 training;
+- `stage2_only_after_training`, a separate scratch-training reference that is
+  not part of the standard FWT equation.
 
 Undefined base scores remain `null`; they are not silently replaced with zero.
 

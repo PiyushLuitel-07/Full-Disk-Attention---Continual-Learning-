@@ -5,9 +5,9 @@ Typical sequence from the project root::
     python -m modeling.train_continual --config configs/pilot.json --stage 1
     python -m modeling.train_continual --config configs/pilot.json --stage 2
 
-Stage 2 refuses to start unless Stage 1's checkpoint and EWC state exist.
-This makes the learning sequence visible and prevents accidental future-data
-initialization.
+For EWC and fine-tuning, Stage 2 refuses to start unless Stage 1's required
+artifacts exist.  The explicit ``stage2_only`` method is the sole exception:
+it starts from random initialization and never loads Stage 1 model weights.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from .dataset import (
     read_manifest,
 )
 from .ewc import EWCState, estimate_diagonal_fisher
+from .forward_transfer import calculate_forward_transfer
 from .metrics import binary_metrics, predictions_from_probabilities
 from .tracking import WandbTracker
 
@@ -82,8 +83,10 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError(f"Configuration is missing sections: {sorted(missing)}")
     if [stage["id"] for stage in config["stages"]] != [1, 2]:
         raise ValueError("This focused implementation expects exactly stages 1 and 2")
-    if config["experiment"]["method"] not in {"ewc", "finetune"}:
-        raise ValueError("experiment.method must be 'ewc' or 'finetune'")
+    if config["experiment"]["method"] not in {"ewc", "finetune", "stage2_only"}:
+        raise ValueError(
+            "experiment.method must be 'ewc', 'finetune', or 'stage2_only'"
+        )
     tracking = config["tracking"]
     if tracking.get("enabled", False):
         missing_tracking = {"entity", "project"} - set(tracking)
@@ -297,12 +300,29 @@ def fisher_summary(fisher: dict[str, torch.Tensor], sample_count: int) -> dict[s
     return {"sample_count": sample_count, "layers": layers}
 
 
+def comparison_controls(config: dict[str, Any]) -> dict[str, Any]:
+    """Fields that must match for a scientifically controlled comparison."""
+
+    return {
+        "seed": int(config["experiment"]["seed"]),
+        "outer_fold": int(config["experiment"]["outer_fold"]),
+        "stages": config["stages"],
+        "model": config["model"],
+        "training": config["training"],
+        "manifest_dir": config["paths"]["manifest_dir"],
+        "image_root": config["paths"]["image_root"],
+    }
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     stage = args.stage
     seed = int(config["experiment"]["seed"])
     method = config["experiment"]["method"]
+    is_stage2_reference = method == "stage2_only"
+    if is_stage2_reference and stage != 2:
+        raise ValueError("method='stage2_only' must be run with --stage 2")
     device = select_device(args.device)
 
     manifest_dir = project_path(config["paths"]["manifest_dir"])
@@ -332,7 +352,8 @@ def main() -> None:
     ).to(device)
     ewc_state = EWCState()
     previous_stage_summary: dict[str, Any] | None = None
-    if stage > 1:
+    source_run_dir: Path | None = None
+    if stage > 1 and not is_stage2_reference:
         previous_checkpoint = run_dir / "checkpoints" / f"stage{stage - 1}.pt"
         previous_ewc = (
             run_dir / "ewc" / f"through_stage{stage - 1}.pt"
@@ -367,6 +388,39 @@ def main() -> None:
                 "The Stage 1 summary lacks the zero-shot Stage 2 evaluation R_1,2. "
                 "Run Stage 1 with the complete-matrix code before starting Stage 2."
             )
+    elif is_stage2_reference:
+        source_value = config["paths"].get("source_continual_run_dir")
+        if not source_value:
+            raise ValueError(
+                "A stage2_only configuration requires paths.source_continual_run_dir"
+            )
+        source_run_dir = project_path(source_value)
+        source_checkpoint = source_run_dir / "checkpoints" / "stage1.pt"
+        source_summary_path = source_run_dir / "metrics" / "stage1_summary.json"
+        if not source_checkpoint.is_file() or not source_summary_path.is_file():
+            raise FileNotFoundError(
+                "Run Stage 1 of the source continual experiment first. Expected "
+                f"{source_checkpoint} and {source_summary_path}"
+            )
+        source_checkpoint_payload = load_torch(
+            source_checkpoint, torch.device("cpu")
+        )
+        source_config = source_checkpoint_payload.get("config")
+        if not isinstance(source_config, dict):
+            raise ValueError("The source Stage 1 checkpoint does not contain its config")
+        if comparison_controls(source_config) != comparison_controls(config):
+            raise ValueError(
+                "The Stage-2-only reference and source continual run do not have "
+                "matching seed, fold, stages, model, training, or data paths"
+            )
+        previous_stage_summary = json.loads(
+            source_summary_path.read_text(encoding="utf-8")
+        )
+        if "stage2" not in previous_stage_summary.get("evaluations", {}):
+            raise ValueError(
+                "The source Stage 1 summary lacks the Stage 2 zero-shot evaluation "
+                "R_1,2"
+            )
 
     training = config["training"]
     batch_size = int(training["batch_size"])
@@ -398,6 +452,32 @@ def main() -> None:
     use_ewc = stage > 1 and method == "ewc"
     start_time = time.time()
     history: list[dict[str, Any]] = []
+
+    random_baseline: dict[str, Any] | None = None
+    if is_stage2_reference:
+        baseline_samples = read_manifest(manifest_dir / "stage2_eval.csv")
+        validate_stage_years(baseline_samples, config, 2)
+        baseline_dataset = MagnetogramDataset(
+            baseline_samples,
+            image_root,
+            int(config["model"]["image_size"]),
+            augment_positive=False,
+        )
+        baseline_loader = make_ordered_loader(
+            baseline_dataset, batch_size, workers, pin_memory
+        )
+        random_baseline, baseline_predictions = evaluate(
+            model, baseline_loader, criterion, float(training["threshold"]), device
+        )
+        tracker.log_evaluation(0, 2, random_baseline, baseline_predictions)
+        write_predictions(
+            run_dir / "predictions" / "random_init_eval_stage2.csv",
+            baseline_predictions,
+        )
+        print(
+            "random_init_eval_stage=2 "
+            f"tss={random_baseline['tss']:.4f} hss={random_baseline['hss']:.4f}"
+        )
 
     print(f"Training Stage {stage} on {device}; method={method}; EWC active={use_ewc}")
     for epoch in range(1, int(training["epochs_per_stage"]) + 1):
@@ -433,7 +513,9 @@ def main() -> None:
     # after Stage 1 this records R_1,2: zero-shot performance on 2013--2014
     # before any Stage 2 optimization. Evaluation runs under inference_mode and
     # never contributes gradients, Fisher values, or checkpoint selection.
-    evaluation_stage_ids = [item["id"] for item in config["stages"]]
+    evaluation_stage_ids = (
+        [2] if is_stage2_reference else [item["id"] for item in config["stages"]]
+    )
     for evaluated_stage in evaluation_stage_ids:
         eval_samples = read_manifest(manifest_dir / f"stage{evaluated_stage}_eval.csv")
         validate_stage_years(eval_samples, config, evaluated_stage)
@@ -501,15 +583,25 @@ def main() -> None:
         ewc_state.add_stage(model, fisher)
         fisher_result = fisher_summary(fisher, fisher_count)
     else:
-        print("Skipping Fisher estimation because method=finetune")
+        print(f"Skipping Fisher estimation because method={method}")
 
     continual_result: dict[str, Any] | None = None
-    if stage == 2:
+    if stage == 2 and not is_stage2_reference:
         if previous_stage_summary is None:
             raise AssertionError("Stage 2 requires the Stage 1 summary")
         continual_result = calculate_two_stage_metrics(
             previous_stage_summary,
             {"evaluations": evaluations},
+        )
+
+    forward_transfer_result: dict[str, Any] | None = None
+    if is_stage2_reference:
+        if previous_stage_summary is None or random_baseline is None:
+            raise AssertionError("Stage-2-only reference inputs were not prepared")
+        forward_transfer_result = calculate_forward_transfer(
+            previous_stage_summary,
+            random_baseline,
+            evaluations["stage2"],
         )
 
     checkpoint = {
@@ -521,7 +613,9 @@ def main() -> None:
         "scheduler_state_dict": scheduler.state_dict(),
         "config": config,
         "evaluations": evaluations,
+        "random_initialization_evaluation": random_baseline,
         "continual_metrics": continual_result,
+        "forward_transfer": forward_transfer_result,
         "elapsed_seconds": time.time() - start_time,
     }
     atomic_torch_save(checkpoint, checkpoint_path)
@@ -538,7 +632,9 @@ def main() -> None:
         "ewc_was_active": use_ewc,
         "ewc_lambda": float(config["ewc"]["lambda"]) if method == "ewc" else 0.0,
         "evaluations": evaluations,
+        "random_initialization_evaluation": random_baseline,
         "continual_metrics": continual_result,
+        "forward_transfer": forward_transfer_result,
         "fisher_examples": fisher_count,
         "checkpoint": str(checkpoint_path),
         "ewc_state": str(ewc_path) if ewc_path is not None else None,
@@ -552,19 +648,24 @@ def main() -> None:
             "seed": seed,
             "outer_fold": int(config["experiment"]["outer_fold"]),
             "ewc_lambda": float(config["ewc"]["lambda"]) if method == "ewc" else 0.0,
-            "comparison_controls": {
-                "seed": seed,
-                "outer_fold": int(config["experiment"]["outer_fold"]),
-                "stages": config["stages"],
-                "model": config["model"],
-                "training": config["training"],
-                "manifest_dir": config["paths"]["manifest_dir"],
-                "image_root": config["paths"]["image_root"],
-            },
+            "comparison_controls": comparison_controls(config),
             **continual_result,
         }
         write_json(run_dir / "metrics" / "continual_summary.json", continual_summary)
         tracker.log_continual_metrics(continual_summary)
+    if forward_transfer_result is not None:
+        reference_summary = {
+            "method": method,
+            "trained_stage": 2,
+            "source_continual_run_dir": str(source_run_dir),
+            "comparison_controls": comparison_controls(config),
+            **forward_transfer_result,
+        }
+        write_json(
+            run_dir / "metrics" / "forward_transfer_summary.json",
+            reference_summary,
+        )
+        tracker.log_forward_transfer(reference_summary)
     if fisher_result is not None:
         write_json(
             run_dir / "ewc" / f"stage{stage}_fisher_summary.json", fisher_result

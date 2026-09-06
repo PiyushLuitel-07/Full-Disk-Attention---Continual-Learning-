@@ -123,6 +123,27 @@ Because Fisher information cannot influence this baseline, the trainer skips
 Fisher estimation and does not save an EWC state. This makes fine-tuning the
 direct control needed to determine whether EWC actually reduces forgetting.
 
+### Stage-2-only forward-transfer reference
+
+When `experiment.method` is `stage2_only`, the trainer accepts only `--stage 2`
+and deliberately does not load Stage 1 weights. It evaluates the randomly
+initialized model on held-out 2013–2014 rows, producing the baseline `b_2`.
+It then trains from scratch using only `stage2_train.csv` and reports the final
+Stage-2-only result.
+
+The reference configuration points to an existing EWC run so the code can read
+its Stage 1 zero-shot score `R_1,2`. It reads that run's checkpoint only to
+verify matching controls; it never copies its model parameters. For TSS and HSS:
+
+```text
+forward transfer = R_1,2 - b_2
+```
+
+A positive result means learning 2010–2012 helped predictions on 2013–2014
+before any 2013–2014 training. The score after training the scratch model is
+also saved as `stage2_only_after_training`, but that value is not `b_2` and is
+not used in the standard forward-transfer equation.
+
 ## 7. Evaluation measures both learning and forgetting
 
 After Stage 2, the model is evaluated independently on:
@@ -158,5 +179,7 @@ that scientific question; it only proves that the mechanism executes.
 - prediction CSV: makes all metrics independently reproducible;
 - Fisher summary: exposes zero/non-zero counts and layer importance magnitude;
 - provenance: records the command and software/device versions.
+- forward-transfer summary: keeps `R_1,2`, random baseline `b_2`, FWT, and the
+  trained Stage-2-only reference together for TSS and HSS.
 
 No output from the original repository is overwritten.

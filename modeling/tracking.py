@@ -265,6 +265,36 @@ class WandbTracker:
         payload["cl/two_stage_summary"] = table
         self.run.log(payload)
 
+    def log_forward_transfer(self, summary: dict[str, Any]) -> None:
+        """Log random baselines and standard forward-transfer measurements."""
+
+        if not self.enabled:
+            return
+        table = self.wandb.Table(
+            columns=[
+                "base_metric",
+                "R_1_2",
+                "random_baseline_b_2",
+                "forward_transfer",
+                "stage2_only_after_training",
+            ]
+        )
+        payload: dict[str, Any] = {"trained_through_stage": 2}
+        for base_metric, values in summary["metrics"].items():
+            table.add_data(
+                base_metric,
+                values["stage1_zero_shot_R_1_2"],
+                values["random_init_baseline_b_2"],
+                values["forward_transfer"],
+                values["stage2_only_after_training"],
+            )
+            for name, value in values.items():
+                key = f"forward_transfer/{base_metric}_{name}"
+                payload[key] = value
+                self.run.summary[key] = value
+        payload["forward_transfer/summary"] = table
+        self.run.log(payload)
+
     def log_run_artifact(
         self,
         stage: int,
