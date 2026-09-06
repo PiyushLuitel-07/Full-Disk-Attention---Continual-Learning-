@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from modeling.continual_metrics import calculate_two_stage_metrics
+
 
 def format_summary(summaries: dict[int, dict[str, Any]]) -> list[str]:
     """Return CSV lines for the complete two-stage metric matrix."""
@@ -30,6 +32,22 @@ def format_summary(summaries: dict[int, dict[str, Any]]) -> list[str]:
         )
         if isinstance(first, (int, float)) and isinstance(old_after_new, (int, float)):
             lines.append(f"{metric}_forgetting,{first - old_after_new}")
+    if 1 in summaries and 2 in summaries:
+        result = calculate_two_stage_metrics(summaries[1], summaries[2])
+        lines.extend(["", "continual_metric,tss,hss"])
+        metric_names = (
+            "final_average",
+            "average_incremental_performance",
+            "forgetting",
+            "backward_transfer",
+            "stage2_zero_shot",
+            "stage2_after_training",
+            "stage2_gain",
+        )
+        for name in metric_names:
+            tss_value = result["continual_metrics"]["tss"][name]
+            hss_value = result["continual_metrics"]["hss"][name]
+            lines.append(f"{name},{tss_value},{hss_value}")
     return lines
 
 

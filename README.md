@@ -309,6 +309,7 @@ runs/<run>/
 ├── ewc/stage*_fisher_summary.json
 ├── metrics/history.csv
 ├── metrics/stage*_summary.json
+├── metrics/continual_summary.json
 ├── predictions/after_stage*_eval_stage*.csv
 └── provenance_stage*.json
 ```
@@ -329,6 +330,20 @@ checkpoint after Stage 2             R_2,1                 R_2,2
 
 `R_1,2` measures zero-shot performance before Stage 2 learning. It is recorded
 for forward-transfer analysis but is never used to train Stage 1.
+
+After Stage 2, `continual_summary.json`, W&B, and `summarize_run.py` report the
+following separately for TSS and HSS:
+
+- `final_average = (R_2,1 + R_2,2) / 2`, performance over both learned stages;
+- `average_incremental_performance = (R_1,1 + final_average) / 2`, which also
+  accounts for performance after the first learning step;
+- `forgetting = R_1,1 - R_2,1`, where a positive value means old skill fell;
+- `backward_transfer = R_2,1 - R_1,1`, the signed inverse of forgetting in this
+  two-stage experiment;
+- `stage2_gain = R_2,2 - R_1,2`, improvement from zero-shot prediction to the
+  trained Stage 2 checkpoint.
+
+Undefined base scores remain `null`; they are not silently replaced with zero.
 
 Classic EWC stores one anchor and one Fisher value per parameter. For this
 roughly 7.5-million-parameter model, Stage 1 EWC state is around 60 MB in

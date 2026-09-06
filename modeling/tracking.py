@@ -224,6 +224,47 @@ class WandbTracker:
         ):
             self.run.summary[key] = summary[key]
 
+    def log_continual_metrics(self, summary: dict[str, Any]) -> None:
+        """Log formal CL metrics and their underlying four-cell matrix."""
+
+        if not self.enabled:
+            return
+        table = self.wandb.Table(
+            columns=[
+                "base_metric",
+                "R_1_1",
+                "R_1_2",
+                "R_2_1",
+                "R_2_2",
+                "final_average",
+                "average_incremental_performance",
+                "forgetting",
+                "backward_transfer",
+                "stage2_gain",
+            ]
+        )
+        payload: dict[str, Any] = {"trained_through_stage": 2}
+        for base_metric, values in summary["continual_metrics"].items():
+            matrix = summary["performance_matrices"][base_metric]
+            table.add_data(
+                base_metric,
+                matrix["after_stage1"]["eval_stage1"],
+                matrix["after_stage1"]["eval_stage2"],
+                matrix["after_stage2"]["eval_stage1"],
+                matrix["after_stage2"]["eval_stage2"],
+                values["final_average"],
+                values["average_incremental_performance"],
+                values["forgetting"],
+                values["backward_transfer"],
+                values["stage2_gain"],
+            )
+            for name, value in values.items():
+                key = f"cl/{base_metric}_{name}"
+                payload[key] = value
+                self.run.summary[key] = value
+        payload["cl/two_stage_summary"] = table
+        self.run.log(payload)
+
     def log_run_artifact(
         self,
         stage: int,

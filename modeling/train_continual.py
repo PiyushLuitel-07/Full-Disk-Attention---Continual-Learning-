@@ -30,6 +30,7 @@ import torch
 from torch import nn
 
 from .attention_model import AttnNet
+from .continual_metrics import calculate_two_stage_metrics
 from .dataset import (
     MagnetogramDataset,
     Sample,
@@ -323,12 +324,19 @@ def main() -> None:
         attention=bool(config["model"]["attention"]),
     ).to(device)
     ewc_state = EWCState()
+    previous_stage_summary: dict[str, Any] | None = None
     if stage > 1:
         previous_checkpoint = run_dir / "checkpoints" / f"stage{stage - 1}.pt"
         previous_ewc = run_dir / "ewc" / f"through_stage{stage - 1}.pt"
-        if not previous_checkpoint.is_file() or not previous_ewc.is_file():
+        previous_summary = run_dir / "metrics" / f"stage{stage - 1}_summary.json"
+        if not (
+            previous_checkpoint.is_file()
+            and previous_ewc.is_file()
+            and previous_summary.is_file()
+        ):
             raise FileNotFoundError(
-                f"Train Stage {stage - 1} first. Expected {previous_checkpoint} and {previous_ewc}"
+                f"Train Stage {stage - 1} first. Expected {previous_checkpoint}, "
+                f"{previous_ewc}, and {previous_summary}"
             )
         checkpoint = load_torch(previous_checkpoint, device)
         if checkpoint.get("config") != config:
@@ -340,6 +348,12 @@ def main() -> None:
         ewc_state = EWCState.from_state_dict(
             load_torch(previous_ewc, torch.device("cpu"))
         ).to(device)
+        previous_stage_summary = json.loads(previous_summary.read_text(encoding="utf-8"))
+        if "stage2" not in previous_stage_summary.get("evaluations", {}):
+            raise ValueError(
+                "The Stage 1 summary lacks the zero-shot Stage 2 evaluation R_1,2. "
+                "Run Stage 1 with the complete-matrix code before starting Stage 2."
+            )
 
     training = config["training"]
     batch_size = int(training["batch_size"])
@@ -467,6 +481,15 @@ def main() -> None:
     )
     ewc_state.add_stage(model, fisher)
 
+    continual_result: dict[str, Any] | None = None
+    if stage == 2:
+        if previous_stage_summary is None:
+            raise AssertionError("Stage 2 requires the Stage 1 summary")
+        continual_result = calculate_two_stage_metrics(
+            previous_stage_summary,
+            {"evaluations": evaluations},
+        )
+
     checkpoint = {
         "stage": stage,
         "method": method,
@@ -476,6 +499,7 @@ def main() -> None:
         "scheduler_state_dict": scheduler.state_dict(),
         "config": config,
         "evaluations": evaluations,
+        "continual_metrics": continual_result,
         "elapsed_seconds": time.time() - start_time,
     }
     atomic_torch_save(checkpoint, checkpoint_path)
@@ -491,12 +515,24 @@ def main() -> None:
         "ewc_was_active": use_ewc,
         "ewc_lambda": float(config["ewc"]["lambda"]),
         "evaluations": evaluations,
+        "continual_metrics": continual_result,
         "fisher_examples": fisher_count,
         "checkpoint": str(checkpoint_path),
         "ewc_state": str(ewc_path),
         "elapsed_seconds": checkpoint["elapsed_seconds"],
     }
     write_json(run_dir / "metrics" / f"stage{stage}_summary.json", summary)
+    if continual_result is not None:
+        continual_summary = {
+            "trained_through_stage": stage,
+            "method": method,
+            "seed": seed,
+            "outer_fold": int(config["experiment"]["outer_fold"]),
+            "ewc_lambda": float(config["ewc"]["lambda"]),
+            **continual_result,
+        }
+        write_json(run_dir / "metrics" / "continual_summary.json", continual_summary)
+        tracker.log_continual_metrics(continual_summary)
     fisher_result = fisher_summary(fisher, fisher_count)
     write_json(run_dir / "ewc" / f"stage{stage}_fisher_summary.json", fisher_result)
     tracker.log_fisher(stage, fisher_result)
