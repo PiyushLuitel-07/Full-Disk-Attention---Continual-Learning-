@@ -453,6 +453,40 @@ This small project is a clear starting point, not the final thesis experiment:
 Keep this code stable until the two-stage real-data run is understood. Then add
 the later stages or baselines as separate, deliberate experiments.
 
+## Four-stage medium extension foundation
+
+The manifest generator can also prepare the planned chronological extension:
+
+```text
+Stage 1: 2010–2012
+Stage 2: 2013–2014
+Stage 3: 2015–2016
+Stage 4: 2017–2018
+```
+
+Generate deterministic medium manifests with:
+
+```bash
+python data_labeling/make_stage_manifests.py \
+  --fold 3 \
+  --number-of-stages 4 \
+  --output-dir data/manifests/fold3_presentation_4stage \
+  --max-train-per-class 500 \
+  --max-eval-per-class 200 \
+  --fisher-per-class 64
+```
+
+The cap is a maximum: if a class contains fewer observations, every available
+row is retained rather than inventing data. In Fold 3, Stage 4 has only 89 FL
+training rows during 2017–2018, so its medium training manifest contains 500 NF
+and all 89 FL rows. Weighted sampling will balance training batches.
+
+The matched configurations are `configs/presentation_4stage_ewc.json` and
+`configs/presentation_4stage_finetune.json`. They intentionally use new run
+directories and do not overwrite the completed two-stage experiment. The
+trainer and CL reporting must be generalized in the next implementation step
+before these four-stage configurations can be run.
+
 ## License note
 
 This project derives the model architecture from `../fulldiskattention`, which

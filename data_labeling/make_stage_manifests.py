@@ -1,10 +1,15 @@
-"""Create chronological Stage 1/2 manifests from the original paper folds.
+"""Create chronological Stage 1--4 manifests from the original paper folds.
 
 No labels are regenerated. We only intersect the already committed fold files
-with the two year ranges requested by the continual-learning plan:
+with the chronological year ranges requested by the continual-learning plan:
 
 * Stage 1: 2010--2012
 * Stage 2: 2013--2014
+* Stage 3: 2015--2016
+* Stage 4: 2017--2018
+
+The default remains two stages so existing commands and experiments do not
+silently change. Pass ``--number-of-stages 4`` for the extended experiment.
 """
 
 from __future__ import annotations
@@ -29,7 +34,12 @@ DEFAULT_SOURCE = (
     / "data_labels"
     / "simplified_data_labels"
 )
-STAGES = {1: (2010, 2012), 2: (2013, 2014)}
+STAGES = {
+    1: (2010, 2012),
+    2: (2013, 2014),
+    3: (2015, 2016),
+    4: (2017, 2018),
+}
 FILENAME_PATTERN = re.compile(r"HMI\.m(\d{4})\.(\d{2})\.(\d{2})_(\d{2})\.(\d{2})\.(\d{2})\.jpg$")
 
 
@@ -49,6 +59,13 @@ class Row:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fold", type=int, choices=(1, 2, 3, 4), default=3)
+    parser.add_argument(
+        "--number-of-stages",
+        type=int,
+        choices=(2, 4),
+        default=2,
+        help="Keep the existing two-stage plan or extend it through 2018",
+    )
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument(
         "--output-dir",
@@ -103,11 +120,11 @@ def deterministic_cap(rows: list[Row], per_class: int, seed: int) -> list[Row]:
     selected: list[Row] = []
     for target in (0, 1):
         candidates = [row for row in rows if row.target == target]
-        if len(candidates) < per_class:
-            raise ValueError(
-                f"Requested {per_class} rows for class {target}, only {len(candidates)} exist"
-            )
-        selected.extend(random.Random(seed + target).sample(candidates, per_class))
+        # ``per_class`` is a maximum, not a request to fabricate observations.
+        # This matters for Stage 4, which contains only 89 FL training rows in
+        # Fold 3. Keep every available row when the requested cap is larger.
+        count = min(per_class, len(candidates))
+        selected.extend(random.Random(seed + target).sample(candidates, count))
     return sorted(selected, key=lambda row: row.timestamp)
 
 
@@ -149,6 +166,7 @@ def main() -> None:
     summary: dict[str, object] = {
         "outer_fold": args.fold,
         "seed": args.seed,
+        "number_of_stages": args.number_of_stages,
         "source": {
             "train": str(train_source),
             "train_sha256": sha256(train_source),
@@ -159,7 +177,8 @@ def main() -> None:
     }
     all_stage_paths: set[str] = set()
 
-    for stage, (start_year, end_year) in STAGES.items():
+    selected_stages = list(STAGES.items())[: args.number_of_stages]
+    for stage, (start_year, end_year) in selected_stages:
         stage_train_pool = [
             row for row in train_rows if start_year <= row.timestamp.year <= end_year
         ]
@@ -230,4 +249,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

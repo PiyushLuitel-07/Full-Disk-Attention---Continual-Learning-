@@ -1,0 +1,57 @@
+{
+  "experiment": {
+    "name": "four_stage_ewc_presentation_fold3",
+    "method": "ewc",
+    "seed": 4,
+    "outer_fold": 3
+  },
+  "stages": [
+    {"id": 1, "start_year": 2010, "end_year": 2012},
+    {"id": 2, "start_year": 2013, "end_year": 2014},
+    {"id": 3, "start_year": 2015, "end_year": 2016},
+    {"id": 4, "start_year": 2017, "end_year": 2018}
+  ],
+  "model": {
+    "attention": true,
+    "image_size": 256,
+    "num_classes": 2
+  },
+  "training": {
+    "epochs_per_stage": 10,
+    "batch_size": 32,
+    "max_batches_per_epoch": 0,
+    "num_workers": 4,
+    "augment_positive": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.5,
+    "lr_halving_period_epochs": 3,
+    "threshold": 0.5
+  },
+  "ewc": {
+    "variant": "classic_multi_anchor",
+    "lambda": 10.0,
+    "fisher_kind": "empirical_true_label",
+    "fisher_distribution": "class_balanced",
+    "fisher_loader_batch_size": 4,
+    "maximum_total_fisher_examples": 128
+  },
+  "data": {
+    "description": "Four-stage medium real-HMI experiment; Stage 4 uses all 89 available Fold 3 FL training rows"
+  },
+  "tracking": {
+    "enabled": true,
+    "entity": "piyush-luitel-texas-christian-university",
+    "project": "Full disk attention solar flare prediction with continual learning",
+    "mode": "online",
+    "group": null,
+    "tags": ["continual-learning", "ewc", "four-stage", "medium", "real-hmi"],
+    "notes": "Four-stage chronological medium HMI EWC experiment through 2018.",
+    "save_code": true,
+    "log_artifacts": true
+  },
+  "paths": {
+    "manifest_dir": "data/manifests/fold3_presentation_4stage_ready",
+    "image_root": "data/pres_images",
+    "run_dir": "runs/presentation_4stage_ewc"
+  }
+}

@@ -35,6 +35,15 @@ class MethodConfigTests(unittest.TestCase):
             expected, controls(load("server_stage2_reference_template.json"))
         )
 
+    def test_four_stage_presentation_configs_are_matched(self) -> None:
+        ewc = load("presentation_4stage_ewc.json")
+        finetune = load("presentation_4stage_finetune.json")
+        self.assertEqual(controls(ewc), controls(finetune))
+        self.assertEqual(
+            [stage["id"] for stage in ewc["stages"]],
+            [1, 2, 3, 4],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
