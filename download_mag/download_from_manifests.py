@@ -36,6 +36,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--max-images", type=int, default=0)
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Keep an existing destination JPEG and continue with the next path",
+    )
+    parser.add_argument(
+        "--skip-unavailable",
+        action="store_true",
+        help="Record HMI observations farther than 12 minutes away and continue",
+    )
     return parser.parse_args()
 
 
@@ -81,63 +91,114 @@ def main() -> None:
         paths = paths[: args.max_images]
     if not paths:
         raise ValueError("The supplied manifests contain no image paths")
-    provenance_rows: list[dict[str, object]] = []
-
-    for number, relative_path in enumerate(paths, start=1):
-        destination = image_root / relative_path
-        timestamp = requested_timestamp(relative_path)
-        requested_utc = timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        metadata_bytes = request_bytes(
-            METADATA_API,
-            {"date": requested_utc, "sourceId": args.source_id},
-            args.timeout,
-            args.retries,
-        )
-        metadata = json.loads(metadata_bytes)
-        returned = datetime.strptime(metadata["date"], "%Y-%m-%d %H:%M:%S")
-        offset_seconds = abs(int((returned - timestamp).total_seconds()))
-        if offset_seconds > 12 * 60:
-            raise RuntimeError(
-                f"Closest HMI observation is {offset_seconds}s from {requested_utc}"
-            )
-
-        jp2_bytes = request_bytes(
-            JP2_API,
-            {"date": requested_utc, "sourceId": args.source_id},
-            args.timeout,
-            args.retries,
-        )
-        with Image.open(io.BytesIO(jp2_bytes)) as decoded:
-            image = decoded.convert("L").resize((512, 512), Image.Resampling.LANCZOS)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            image.save(destination, format="JPEG", quality=95)
-
-        if args.jp2_root:
-            jp2_path = args.jp2_root.expanduser().resolve() / Path(relative_path).with_suffix(
-                ".jp2"
-            )
-            jp2_path.parent.mkdir(parents=True, exist_ok=True)
-            jp2_path.write_bytes(jp2_bytes)
-
-        provenance_rows.append(
-            {
-                "relative_jpg": relative_path,
-                "requested_utc": requested_utc,
-                "returned_utc": metadata["date"] + "Z",
-                "offset_seconds": offset_seconds,
-                "helioviewer_id": metadata.get("id", ""),
-                "jp2_sha256": hashlib.sha256(jp2_bytes).hexdigest(),
-            }
-        )
-        print(f"[{number}/{len(paths)}] {requested_utc} -> {destination}")
-
     args.provenance.parent.mkdir(parents=True, exist_ok=True)
     with args.provenance.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(provenance_rows[0]))
+        fieldnames = [
+            "relative_jpg",
+            "requested_utc",
+            "returned_utc",
+            "offset_seconds",
+            "helioviewer_id",
+            "jp2_sha256",
+            "status",
+            "reason",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(provenance_rows)
-    print(f"Downloaded {len(paths)} images; provenance: {args.provenance}")
+        handle.flush()
+
+        downloaded = skipped_existing = skipped_unavailable = 0
+        for number, relative_path in enumerate(paths, start=1):
+            destination = image_root / relative_path
+            timestamp = requested_timestamp(relative_path)
+            requested_utc = timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            if args.skip_existing and destination.is_file():
+                skipped_existing += 1
+                writer.writerow(
+                    {
+                        "relative_jpg": relative_path,
+                        "requested_utc": requested_utc,
+                        "status": "skipped_existing",
+                        "reason": "destination JPEG already exists",
+                    }
+                )
+                handle.flush()
+                print(f"[{number}/{len(paths)}] SKIP existing {destination}")
+                continue
+
+            metadata_bytes = request_bytes(
+                METADATA_API,
+                {"date": requested_utc, "sourceId": args.source_id},
+                args.timeout,
+                args.retries,
+            )
+            metadata = json.loads(metadata_bytes)
+            returned = datetime.strptime(metadata["date"], "%Y-%m-%d %H:%M:%S")
+            offset_seconds = abs(int((returned - timestamp).total_seconds()))
+            if offset_seconds > 12 * 60:
+                message = (
+                    f"Closest HMI observation is {offset_seconds}s from {requested_utc}"
+                )
+                if not args.skip_unavailable:
+                    raise RuntimeError(message)
+                skipped_unavailable += 1
+                writer.writerow(
+                    {
+                        "relative_jpg": relative_path,
+                        "requested_utc": requested_utc,
+                        "returned_utc": metadata["date"] + "Z",
+                        "offset_seconds": offset_seconds,
+                        "helioviewer_id": metadata.get("id", ""),
+                        "status": "skipped_unavailable",
+                        "reason": message,
+                    }
+                )
+                handle.flush()
+                print(f"[{number}/{len(paths)}] SKIP unavailable: {message}")
+                continue
+
+            jp2_bytes = request_bytes(
+                JP2_API,
+                {"date": requested_utc, "sourceId": args.source_id},
+                args.timeout,
+                args.retries,
+            )
+            with Image.open(io.BytesIO(jp2_bytes)) as decoded:
+                image = decoded.convert("L").resize(
+                    (512, 512), Image.Resampling.LANCZOS
+                )
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                image.save(destination, format="JPEG", quality=95)
+
+            if args.jp2_root:
+                jp2_path = (
+                    args.jp2_root.expanduser().resolve()
+                    / Path(relative_path).with_suffix(".jp2")
+                )
+                jp2_path.parent.mkdir(parents=True, exist_ok=True)
+                jp2_path.write_bytes(jp2_bytes)
+
+            downloaded += 1
+            writer.writerow(
+                {
+                    "relative_jpg": relative_path,
+                    "requested_utc": requested_utc,
+                    "returned_utc": metadata["date"] + "Z",
+                    "offset_seconds": offset_seconds,
+                    "helioviewer_id": metadata.get("id", ""),
+                    "jp2_sha256": hashlib.sha256(jp2_bytes).hexdigest(),
+                    "status": "downloaded",
+                    "reason": "",
+                }
+            )
+            handle.flush()
+            print(f"[{number}/{len(paths)}] {requested_utc} -> {destination}")
+
+    print(
+        f"Finished: downloaded={downloaded}, skipped_existing={skipped_existing}, "
+        f"skipped_unavailable={skipped_unavailable}; provenance: {args.provenance}"
+    )
 
 
 if __name__ == "__main__":

@@ -225,8 +225,17 @@ python download_mag/download_from_manifests.py \
              data/manifests/fold3_pilot/stage2_eval.csv \
   --image-root data/hmi_jpgs_512 \
   --jp2-root data/jp2 \
-  --provenance data/download_provenance.csv
+  --provenance data/download_provenance.csv \
+  --skip-existing \
+  --skip-unavailable
 ```
+
+`--skip-existing` makes an interrupted download resumable without downloading
+completed JPEGs again. `--skip-unavailable` records observations whose closest
+HMI image is more than 12 minutes away and continues with the next row. The
+provenance CSV is flushed after every downloaded or skipped path, so completed
+records survive a later interruption. Omitting either flag preserves the
+original strict behavior for that condition.
 
 Then validate that Pillow can decode JPEG2000:
 
