@@ -220,8 +220,14 @@ __marimo__/
 data/hmi_jpgs_512/
 
 # Weights & Biases local cache; runs are uploaded to the configured W&B project.
-wandb/
+data/hmi_jpgs_512/
+data/pres_images/
 data/jp2/
+data/pres_jp2/
+data/*provenance.csv
+data/manifests/**/remaining*.csv
 runs/
-
+wandb/
 *.pt
+data/jp2_presentation/
+data/pres_jp2/

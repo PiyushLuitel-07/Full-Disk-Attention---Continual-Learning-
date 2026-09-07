@@ -1,0 +1,55 @@
+{
+  "experiment": {
+    "name": "two_stage_finetune_fold3",
+    "method": "finetune",
+    "seed": 4,
+    "outer_fold": 3
+  },
+  "stages": [
+    {"id": 1, "start_year": 2010, "end_year": 2012},
+    {"id": 2, "start_year": 2013, "end_year": 2014}
+  ],
+  "model": {
+    "attention": true,
+    "image_size": 256,
+    "num_classes": 2
+  },
+  "training": {
+    "epochs_per_stage": 10,
+    "batch_size": 32,
+    "max_batches_per_epoch": 0,
+    "num_workers": 4,
+    "augment_positive": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.5,
+    "lr_halving_period_epochs": 3,
+    "threshold": 0.5
+  },
+  "ewc": {
+    "variant": "not_used_for_finetune",
+    "lambda": 0.0,
+    "fisher_kind": "not_used_for_finetune",
+    "fisher_distribution": "not_used_for_finetune",
+    "fisher_loader_batch_size": 1,
+    "maximum_total_fisher_examples": 0
+  },
+  "data": {
+    "description": "Real HMI matched fine-tuning baseline"
+  },
+  "tracking": {
+    "enabled": true,
+    "entity": "piyush-luitel-texas-christian-university",
+    "project": "Full disk attention solar flare prediction with continual learning",
+    "mode": "online",
+    "group": null,
+    "tags": ["continual-learning", "finetune", "real-hmi"],
+    "notes": "Matched sequential fine-tuning baseline without EWC.",
+    "save_code": true,
+    "log_artifacts": true
+  },
+  "paths": {
+    "manifest_dir": "data/manifests/fold3",
+    "image_root": "data/hmi_jpgs_512",
+    "run_dir": "runs/fold3_seed4_finetune"
+  }
+}

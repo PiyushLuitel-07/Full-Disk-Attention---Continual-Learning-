@@ -1,0 +1,84 @@
+{
+  "outer_fold": 3,
+  "seed": 4,
+  "source": {
+    "train": "/home/piyushluitel/fulldiskattention/data_labeling/data_labels/simplified_data_labels/Fold3_train.csv",
+    "train_sha256": "f4f9d94887652dfd6c579ea7673262de1d227b375e8b37ba0d479480f343d28d",
+    "eval": "/home/piyushluitel/fulldiskattention/data_labeling/data_labels/simplified_data_labels/Fold3_val.csv",
+    "eval_sha256": "6ce42c1cd70c1ae7b747354f780dc7e97aadc6f97aa5479cf9d40e58e59a474d"
+  },
+  "stages": {
+    "1": {
+      "years": [
+        2010,
+        2012
+      ],
+      "source_train_pool": {
+        "total": 9421,
+        "nf": 7910,
+        "fl": 1511
+      },
+      "source_eval_pool": {
+        "total": 4184,
+        "nf": 3102,
+        "fl": 1082
+      },
+      "written_train": {
+        "total": 1000,
+        "nf": 500,
+        "fl": 500
+      },
+      "written_eval": {
+        "total": 400,
+        "nf": 200,
+        "fl": 200
+      },
+      "written_fisher": {
+        "total": 128,
+        "nf": 64,
+        "fl": 64
+      },
+      "files": {
+        "stage1_train.csv": "8dbca6959fb839c8f63ea8569d7c5398645e1f6451931fd3440e1aad244d694b",
+        "stage1_eval.csv": "6826dd9a80e4a9c7c2543fedc9282fae9baa59e9c4ce47731022aaaa7f63a29c",
+        "stage1_fisher.csv": "14c99c0b187775add1ca98cfcd69ae5851811ad7e0811a4a6fc337997eb3bda9"
+      }
+    },
+    "2": {
+      "years": [
+        2013,
+        2014
+      ],
+      "source_train_pool": {
+        "total": 12026,
+        "nf": 8412,
+        "fl": 3614
+      },
+      "source_eval_pool": {
+        "total": 4039,
+        "nf": 3513,
+        "fl": 526
+      },
+      "written_train": {
+        "total": 1000,
+        "nf": 500,
+        "fl": 500
+      },
+      "written_eval": {
+        "total": 400,
+        "nf": 200,
+        "fl": 200
+      },
+      "written_fisher": {
+        "total": 128,
+        "nf": 64,
+        "fl": 64
+      },
+      "files": {
+        "stage2_train.csv": "48be2297160d8360186cd6f48426157b61e7f443c8e5dd1cbe1f6438293062da",
+        "stage2_eval.csv": "5a04b550decb4b4dd2058880e2e6874b76ce393f556b1dfe4e4980f8be9bb107",
+        "stage2_fisher.csv": "6da457225bb7005bcf019455ef276e766b2f9a97bc1173becf897e1f39e229af"
+      }
+    }
+  }
+}
