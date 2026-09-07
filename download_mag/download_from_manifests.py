@@ -46,6 +46,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Record HMI observations farther than 12 minutes away and continue",
     )
+    parser.add_argument(
+        "--skip-corrupt",
+        action="store_true",
+        help="After repeated JP2 decode failures, record the path and continue",
+    )
     return parser.parse_args()
 
 
@@ -83,6 +88,38 @@ def requested_timestamp(relative_path: str) -> datetime:
     )
 
 
+def request_decoded_image(
+    requested_utc: str,
+    source_id: int,
+    timeout: int,
+    retries: int,
+) -> tuple[bytes, Image.Image]:
+    """Download and fully decode a JP2, retrying corrupt responses."""
+
+    last_error: OSError | None = None
+    for attempt in range(1, retries + 1):
+        jp2_bytes = request_bytes(
+            JP2_API,
+            {"date": requested_utc, "sourceId": source_id},
+            timeout,
+            retries,
+        )
+        try:
+            with Image.open(io.BytesIO(jp2_bytes)) as decoded:
+                image = decoded.convert("L").resize(
+                    (512, 512), Image.Resampling.LANCZOS
+                )
+            return jp2_bytes, image
+        except OSError as error:
+            last_error = error
+            if attempt < retries:
+                time.sleep(2 ** (attempt - 1))
+
+    raise OSError(
+        f"JP2 decoding failed after {retries} attempts for {requested_utc}"
+    ) from last_error
+
+
 def main() -> None:
     args = parse_args()
     image_root = args.image_root.expanduser().resolve()
@@ -107,7 +144,7 @@ def main() -> None:
         writer.writeheader()
         handle.flush()
 
-        downloaded = skipped_existing = skipped_unavailable = 0
+        downloaded = skipped_existing = skipped_unavailable = skipped_corrupt = 0
         for number, relative_path in enumerate(paths, start=1):
             destination = image_root / relative_path
             timestamp = requested_timestamp(relative_path)
@@ -158,18 +195,34 @@ def main() -> None:
                 print(f"[{number}/{len(paths)}] SKIP unavailable: {message}")
                 continue
 
-            jp2_bytes = request_bytes(
-                JP2_API,
-                {"date": requested_utc, "sourceId": args.source_id},
-                args.timeout,
-                args.retries,
-            )
-            with Image.open(io.BytesIO(jp2_bytes)) as decoded:
-                image = decoded.convert("L").resize(
-                    (512, 512), Image.Resampling.LANCZOS
+            try:
+                jp2_bytes, image = request_decoded_image(
+                    requested_utc,
+                    args.source_id,
+                    args.timeout,
+                    args.retries,
                 )
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                image.save(destination, format="JPEG", quality=95)
+            except OSError as error:
+                if not args.skip_corrupt:
+                    raise
+                skipped_corrupt += 1
+                writer.writerow(
+                    {
+                        "relative_jpg": relative_path,
+                        "requested_utc": requested_utc,
+                        "returned_utc": metadata["date"] + "Z",
+                        "offset_seconds": offset_seconds,
+                        "helioviewer_id": metadata.get("id", ""),
+                        "status": "skipped_corrupt",
+                        "reason": str(error),
+                    }
+                )
+                handle.flush()
+                print(f"[{number}/{len(paths)}] SKIP corrupt: {error}")
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            image.save(destination, format="JPEG", quality=95)
 
             if args.jp2_root:
                 jp2_path = (
@@ -197,7 +250,8 @@ def main() -> None:
 
     print(
         f"Finished: downloaded={downloaded}, skipped_existing={skipped_existing}, "
-        f"skipped_unavailable={skipped_unavailable}; provenance: {args.provenance}"
+        f"skipped_unavailable={skipped_unavailable}, "
+        f"skipped_corrupt={skipped_corrupt}; provenance: {args.provenance}"
     )
 
 

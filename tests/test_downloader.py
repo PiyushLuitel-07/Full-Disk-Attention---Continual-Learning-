@@ -99,6 +99,59 @@ class DownloaderTests(unittest.TestCase):
             ):
                 downloader.main()
 
+    def test_corrupt_jp2_is_retried_then_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.csv"
+            manifest.write_text(
+                "label,target\n"
+                "2017/09/10/HMI.m2017.09.10_03.00.00.jpg,1\n"
+                "2017/09/11/HMI.m2017.09.11_03.00.00.jpg,0\n",
+                encoding="utf-8",
+            )
+            image_root = root / "images"
+            provenance = root / "provenance.csv"
+            bad_date = "2017-09-10T03:00:00Z"
+            corrupt_requests = 0
+
+            def fake_request(url, params, _timeout, _retries):
+                nonlocal corrupt_requests
+                requested = str(params["date"])
+                if url == downloader.METADATA_API:
+                    returned = requested.replace("T", " ").removesuffix("Z")
+                    return json.dumps({"date": returned, "id": 19}).encode()
+                if requested == bad_date:
+                    corrupt_requests += 1
+                    return b"not a valid JP2"
+                return self.image_bytes
+
+            arguments = [
+                "download_from_manifests.py",
+                "--manifest",
+                str(manifest),
+                "--image-root",
+                str(image_root),
+                "--provenance",
+                str(provenance),
+                "--retries",
+                "2",
+                "--skip-corrupt",
+            ]
+            with patch.object(sys, "argv", arguments), patch.object(
+                downloader, "request_bytes", side_effect=fake_request
+            ), patch.object(downloader.time, "sleep"), redirect_stdout(io.StringIO()):
+                downloader.main()
+
+            with provenance.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(corrupt_requests, 2)
+            self.assertEqual(
+                [row["status"] for row in rows],
+                ["skipped_corrupt", "downloaded"],
+            )
+            downloaded = image_root / "2017/09/11/HMI.m2017.09.11_03.00.00.jpg"
+            self.assertTrue(downloaded.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
