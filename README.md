@@ -34,10 +34,10 @@ Added for continual learning:
   2010--2018 extension;
 - exact per-example empirical diagonal Fisher estimation;
 - classic multi-anchor EWC;
-- stage-by-stage checkpoints and all-seen-stage evaluation;
+- stage-by-stage checkpoints and complete cross-stage evaluation;
 - safe one-class metrics, JSON/CSV logs, provenance, and bounded downloads;
 - CPU, one-GPU, and normal project-environment support.
-- complete Stage 1/2 experiment tracking in Weights & Biases.
+- complete stage-by-stage experiment tracking in Weights & Biases.
 - a matched Stage-2-only reference and standard forward-transfer measurement.
 
 Fold 3 is the pilot default because it remains useful in later low-activity
@@ -92,7 +92,7 @@ python -m modeling.train_continual \
   --config configs/pilot.json \
   --stage 2
 
-python tools/summarize_run.py --run-dir runs/pilot_ewc
+python -m tools.summarize_run --run-dir runs/pilot_ewc
 ```
 
 Run the matched no-EWC pilot with the same data, seed, model, and training
@@ -107,7 +107,7 @@ python -m modeling.train_continual \
   --config configs/pilot_finetune.json \
   --stage 2
 
-python tools/compare_methods.py \
+python -m tools.compare_methods \
   --ewc-run-dir runs/pilot_ewc \
   --finetune-run-dir runs/pilot_finetune
 ```
@@ -293,14 +293,14 @@ Then run the same two commands with `configs/server_finetune.json`. After both
 sequences finish:
 
 ```bash
-python tools/compare_methods.py \
+python -m tools.compare_methods \
   --ewc-run-dir runs/fold3_seed4_ewc_lambda10 \
   --finetune-run-dir runs/fold3_seed4_finetune
 ```
 
 `forgetting_reduction = finetune_forgetting - EWC_forgetting`; a positive value
-favors EWC. Always inspect `stage2_performance_difference` alongside it because
-retention is not useful if EWC prevents learning the new stage.
+favors EWC. Always inspect `final_stage_performance_difference` alongside it
+because retention is not useful if EWC prevents learning the newest stage.
 
 Finally run the reference directly at Stage 2; there is no Stage 1 command for
 this method:
@@ -380,8 +380,8 @@ If no scheduler exists, use the administrator-approved interactive process
 
 ```text
 runs/<run>/
-├── checkpoints/stage1.pt, stage2.pt
-├── ewc/through_stage1.pt, through_stage2.pt
+├── checkpoints/stage1.pt ... stage4.pt
+├── ewc/through_stage1.pt ... through_stage4.pt
 ├── ewc/stage*_fisher_summary.json
 ├── metrics/history.csv
 ├── metrics/stage*_summary.json
@@ -395,9 +395,8 @@ runs/<run>/
 
 - `history.csv` separates CE, raw EWC, weighted EWC, and total loss.
 - `through_stage1.pt` contains Stage 1 anchors and Fisher diagonals.
-- The four checkpoint/evaluation prediction files let you recompute every
-  entry in the two-stage evaluation matrix.
-- forgetting after Stage 2 is `Stage1_TSS_after_stage1 - Stage1_TSS_after_stage2`.
+- The checkpoint/evaluation prediction files let you recompute every entry in
+  the two-stage or four-stage evaluation matrix.
 
 The complete matrix is:
 
@@ -410,8 +409,8 @@ checkpoint after Stage 2             R_2,1                 R_2,2
 `R_1,2` measures zero-shot performance before Stage 2 learning. It is recorded
 for forward-transfer analysis but is never used to train Stage 1.
 
-After Stage 2, `continual_summary.json`, W&B, and `summarize_run.py` report the
-following separately for TSS and HSS:
+At the final configured stage, `continual_summary.json`, W&B, and
+`summarize_run.py` report the following separately for TSS and HSS:
 
 - `final_average = (R_2,1 + R_2,2) / 2`, performance over both learned stages;
 - `average_incremental_performance = (R_1,1 + final_average) / 2`, which also
@@ -421,6 +420,18 @@ following separately for TSS and HSS:
   two-stage experiment;
 - `stage2_gain = R_2,2 - R_1,2`, improvement from zero-shot prediction to the
   trained Stage 2 checkpoint.
+
+For four stages, the same definitions generalize to the complete 4 × 4 matrix:
+
+- `final_average` is the mean of `R_4,1` through `R_4,4`;
+- `average_incremental_performance` averages performance over learned periods
+  after each of Stages 1, 2, 3, and 4;
+- per-period forgetting compares the final score with that period's best score
+  before Stage 4, then `forgetting` averages Stages 1–3;
+- backward transfer compares each final old-period score with the score when
+  that period was first learned, then averages Stages 1–3;
+- learning gain for Stage `j` is `R_j,j - R_(j-1),j`, and the reported average
+  covers Stages 2–4.
 
 The Stage-2-only reference additionally reports:
 
@@ -500,8 +511,21 @@ anchors/Fishers. Stage 4 requires the Stage 3 checkpoint plus three accumulated
 anchors/Fishers. Every checkpoint is evaluated on all four chronological
 periods, creating the raw data needed for a 4 × 4 performance matrix. Run the
 same four commands with `presentation_4stage_finetune.json` for the matched
-no-EWC sequence. Formal multi-stage metric aggregation and method comparison
-are added separately; the original two-stage reporting remains unchanged.
+no-EWC sequence. After both Stage 4 commands finish:
+
+```bash
+python -m tools.summarize_run --run-dir runs/presentation_4stage_ewc
+python -m tools.summarize_run --run-dir runs/presentation_4stage_finetune
+python -m tools.compare_methods \
+  --ewc-run-dir runs/presentation_4stage_ewc \
+  --finetune-run-dir runs/presentation_4stage_finetune
+```
+
+The Stage 4 command writes `continual_summary.json` and logs the complete 4 × 4
+matrix and derived metrics to W&B. The original two-stage result format remains
+compatible. Multi-stage standard forward transfer is not reported yet because
+it additionally requires matched random-initialization baselines for Stages
+2–4; zero-shot matrix cells are retained for that later analysis.
 
 ## License note
 

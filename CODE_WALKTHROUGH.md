@@ -156,10 +156,15 @@ not used in the standard forward-transfer equation.
 
 ## 7. Evaluation measures both learning and forgetting
 
-After Stage 2, the model is evaluated independently on:
+After every checkpoint, the model is evaluated independently on every
+configured chronological period. In the four-stage run, this produces a 4 × 4
+matrix where `R_i,j` is performance on period `j` after training through Stage
+`i`. Future-period cells are inference-only zero-shot measurements.
 
-- Stage 1 held-out data: did old skill survive?
-- Stage 2 held-out data: did the model learn the new period?
+The most direct checks after any later stage are:
+
+- old-period held-out data: did earlier skill survive?
+- current-period held-out data: did the model learn the new period?
 
 `modeling/metrics.py` calculates TP, FP, TN, FN, TSS, HSS, recall, precision,
 false-positive rate, and accuracy. TSS is:
@@ -171,11 +176,17 @@ TSS = TP / (TP + FN) - FP / (FP + TN)
 When a class is absent, a mathematically undefined metric becomes `NaN`
 internally and `null` in JSON instead of crashing or silently inventing zero.
 
-The simple old-stage forgetting measurement is:
+At the final stage, formal forgetting for each old period is:
 
 ```text
-Stage 1 forgetting = TSS after Stage 1 - Stage 1 TSS after Stage 2
+forgetting_j = best earlier R_i,j - final R_T,j
 ```
+
+The code also reports final average performance, average incremental
+performance, backward transfer, each stage's learning gain, and averages of
+forgetting, backward transfer, and learning gain. These are calculated
+separately for TSS and HSS and saved only after the final configured stage,
+when the complete matrix exists.
 
 EWC has helped only if it forgets less than a matched naive-fine-tuning run
 without destroying current-stage learning. The synthetic pilot cannot answer

@@ -18,6 +18,15 @@ def _difference(
     return float(operation(float(left), float(right)))
 
 
+def _optional_metric(values: dict[str, Any], name: str) -> float | None:
+    value = values.get(name)
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else None
+    )
+
+
 def compare_ewc_with_finetune(
     ewc_summary: dict[str, Any],
     finetune_summary: dict[str, Any],
@@ -39,6 +48,11 @@ def compare_ewc_with_finetune(
             "training settings, manifests, image root, fold, and seed."
         )
 
+    stages = ewc_controls.get("stages", [])
+    final_stage = len(stages)
+    if final_stage < 2:
+        raise ValueError("Comparison requires at least two chronological stages")
+
     results: dict[str, Any] = {}
     for metric in BASE_METRICS:
         try:
@@ -46,7 +60,19 @@ def compare_ewc_with_finetune(
             finetune = finetune_summary["continual_metrics"][metric]
         except KeyError as error:
             raise ValueError(f"Missing {metric} continual metrics") from error
-        results[metric] = {
+        ewc_final_stage = _optional_metric(ewc, "final_stage_after_training")
+        finetune_final_stage = _optional_metric(
+            finetune, "final_stage_after_training"
+        )
+        # Old two-stage summaries predate the generic field name.
+        if final_stage == 2:
+            if ewc_final_stage is None:
+                ewc_final_stage = _optional_metric(ewc, "stage2_after_training")
+            if finetune_final_stage is None:
+                finetune_final_stage = _optional_metric(
+                    finetune, "stage2_after_training"
+                )
+        metric_result = {
             "ewc": ewc,
             "finetune": finetune,
             # Positive means EWC forgot less than ordinary fine-tuning.
@@ -61,9 +87,9 @@ def compare_ewc_with_finetune(
                 finetune["final_average"],
                 lambda proposed, baseline: proposed - baseline,
             ),
-            "stage2_performance_difference": _difference(
-                ewc["stage2_after_training"],
-                finetune["stage2_after_training"],
+            "final_stage_performance_difference": _difference(
+                ewc_final_stage,
+                finetune_final_stage,
                 lambda proposed, baseline: proposed - baseline,
             ),
             "backward_transfer_difference": _difference(
@@ -71,15 +97,35 @@ def compare_ewc_with_finetune(
                 finetune["backward_transfer"],
                 lambda proposed, baseline: proposed - baseline,
             ),
+            "average_incremental_performance_difference": _difference(
+                _optional_metric(ewc, "average_incremental_performance"),
+                _optional_metric(finetune, "average_incremental_performance"),
+                lambda proposed, baseline: proposed - baseline,
+            ),
+            "average_learning_gain_difference": _difference(
+                _optional_metric(ewc, "average_learning_gain"),
+                _optional_metric(finetune, "average_learning_gain"),
+                lambda proposed, baseline: proposed - baseline,
+            ),
         }
+        if final_stage == 2:
+            metric_result["stage2_performance_difference"] = metric_result[
+                "final_stage_performance_difference"
+            ]
+        results[metric] = metric_result
 
     return {
         "definitions": {
             "forgetting_reduction": "finetune forgetting - EWC forgetting; positive favors EWC",
             "final_average_difference": "EWC final average - finetune final average",
-            "stage2_performance_difference": "EWC R_2_2 - finetune R_2_2",
+            "final_stage_performance_difference": "EWC R_T,T - finetune R_T,T",
             "backward_transfer_difference": "EWC BWT - finetune BWT",
+            "average_incremental_performance_difference": "EWC AIP - finetune AIP",
+            "average_learning_gain_difference": (
+                "EWC average learning gain - finetune average learning gain"
+            ),
         },
+        "number_of_stages": final_stage,
         "comparison_controls": ewc_controls,
         "metrics": results,
     }

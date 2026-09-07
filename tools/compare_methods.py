@@ -13,7 +13,7 @@ from modeling.method_comparison import compare_ewc_with_finetune
 def load_summary(run_dir: Path) -> dict:
     path = run_dir / "metrics" / "continual_summary.json"
     if not path.is_file():
-        raise FileNotFoundError(f"Missing completed Stage 2 summary: {path}")
+        raise FileNotFoundError(f"Missing completed continual summary: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -44,12 +44,19 @@ def main() -> None:
     )
     write_json(output, comparison)
 
-    print("metric,forgetting_reduction,final_average_difference,stage2_difference")
+    print(
+        "metric,forgetting_reduction,final_average_difference,"
+        "backward_transfer_difference,average_incremental_performance_difference,"
+        "average_learning_gain_difference,final_stage_difference"
+    )
     for metric, values in comparison["metrics"].items():
         print(
             f"{metric},{values['forgetting_reduction']},"
             f"{values['final_average_difference']},"
-            f"{values['stage2_performance_difference']}"
+            f"{values['backward_transfer_difference']},"
+            f"{values['average_incremental_performance_difference']},"
+            f"{values['average_learning_gain_difference']},"
+            f"{values['final_stage_performance_difference']}"
         )
     print(f"Saved comparison: {output}")
 

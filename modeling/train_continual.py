@@ -31,7 +31,7 @@ import torch
 from torch import nn
 
 from .attention_model import AttnNet
-from .continual_metrics import calculate_two_stage_metrics
+from .continual_metrics import calculate_continual_metrics
 from .dataset import (
     MagnetogramDataset,
     Sample,
@@ -621,13 +621,23 @@ def main() -> None:
         print(f"Skipping Fisher estimation because method={method}")
 
     continual_result: dict[str, Any] | None = None
-    if len(configured_stage_ids) == 2 and stage == 2 and not is_stage2_reference:
-        if previous_stage_summary is None:
-            raise AssertionError("Stage 2 requires the Stage 1 summary")
-        continual_result = calculate_two_stage_metrics(
-            previous_stage_summary,
-            {"evaluations": evaluations},
-        )
+    final_configured_stage = configured_stage_ids[-1]
+    if stage == final_configured_stage and not is_stage2_reference:
+        completed_summaries: dict[int, dict[str, Any]] = {}
+        for completed_stage in configured_stage_ids[:-1]:
+            completed_path = (
+                run_dir / "metrics" / f"stage{completed_stage}_summary.json"
+            )
+            if not completed_path.is_file():
+                raise FileNotFoundError(
+                    f"Missing Stage {completed_stage} summary needed for formal "
+                    f"continual metrics: {completed_path}"
+                )
+            completed_summaries[completed_stage] = json.loads(
+                completed_path.read_text(encoding="utf-8")
+            )
+        completed_summaries[stage] = {"evaluations": evaluations}
+        continual_result = calculate_continual_metrics(completed_summaries)
 
     forward_transfer_result: dict[str, Any] | None = None
     if is_stage2_reference:

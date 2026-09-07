@@ -1,14 +1,16 @@
-"""Formal metrics for the focused two-stage continual-learning experiment.
+"""Formal metrics for chronological continual-learning experiments.
 
 For each base forecast metric (TSS or HSS), ``R_i,j`` means performance on
-Stage j evaluation data after training through Stage i. The complete two-stage
-matrix therefore contains R_1,1, R_1,2, R_2,1, and R_2,2.
+Stage j evaluation data after training through Stage i. The trainer records the
+complete matrix, including future-stage zero-shot cells, without using those
+future examples for optimization.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 
 BASE_METRICS = ("tss", "hss")
@@ -48,54 +50,144 @@ def _calculate(
     return float(operation(*values))
 
 
-def calculate_two_stage_metrics(
-    stage1_summary: dict[str, Any],
-    stage2_summary: dict[str, Any],
+def _mean(values: list[float | None]) -> float | None:
+    return _calculate(tuple(values), lambda *items: sum(items) / len(items))
+
+
+def calculate_continual_metrics(
+    summaries: Mapping[int, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Calculate stability, plasticity, and overall two-stage performance."""
+    """Calculate standard matrix-based metrics through the final stage.
+
+    ``summaries[i]`` must contain evaluations of every configured period after
+    training through Stage ``i``. Stage IDs must be consecutive and start at 1.
+    Undefined TSS/HSS cells propagate to every derived value that uses them.
+    """
+
+    stage_ids = sorted(summaries)
+    if not stage_ids or stage_ids != list(range(1, len(stage_ids) + 1)):
+        raise ValueError("Stage summaries must have consecutive IDs starting at 1")
+    final_stage = stage_ids[-1]
 
     matrices: dict[str, Any] = {}
     derived: dict[str, Any] = {}
     for metric in BASE_METRICS:
-        r11 = _score(stage1_summary, 1, metric, 1)
-        r12 = _score(stage1_summary, 2, metric, 1)
-        r21 = _score(stage2_summary, 1, metric, 2)
-        r22 = _score(stage2_summary, 2, metric, 2)
-        final_average = _calculate(
-            (r21, r22), lambda old, new: (old + new) / 2.0
-        )
-        average_incremental = _calculate(
-            (r11, final_average), lambda first, final: (first + final) / 2.0
-        )
-
+        values = {
+            trained_stage: {
+                evaluated_stage: _score(
+                    summaries[trained_stage],
+                    evaluated_stage,
+                    metric,
+                    trained_stage,
+                )
+                for evaluated_stage in stage_ids
+            }
+            for trained_stage in stage_ids
+        }
         matrices[metric] = {
-            "after_stage1": {"eval_stage1": r11, "eval_stage2": r12},
-            "after_stage2": {"eval_stage1": r21, "eval_stage2": r22},
+            f"after_stage{trained_stage}": {
+                f"eval_stage{evaluated_stage}": values[trained_stage][evaluated_stage]
+                for evaluated_stage in stage_ids
+            }
+            for trained_stage in stage_ids
         }
-        derived[metric] = {
-            "average_after_stage1": r11,
-            "final_average": final_average,
-            "average_incremental_performance": average_incremental,
-            "forgetting": _calculate((r11, r21), lambda old, retained: old - retained),
-            "backward_transfer": _calculate(
-                (r11, r21), lambda old, retained: retained - old
-            ),
-            "stage2_zero_shot": r12,
-            "stage2_after_training": r22,
-            "stage2_gain": _calculate(
-                (r12, r22), lambda zero_shot, learned: learned - zero_shot
-            ),
+
+        average_after_stage = {
+            f"stage{trained_stage}": _mean(
+                [values[trained_stage][task] for task in range(1, trained_stage + 1)]
+            )
+            for trained_stage in stage_ids
         }
+        forgetting_by_stage: dict[str, float | None] = {}
+        backward_transfer_by_stage: dict[str, float | None] = {}
+        for task in range(1, final_stage):
+            before_final = [values[when][task] for when in range(task, final_stage)]
+            final_score = values[final_stage][task]
+            forgetting_by_stage[f"stage{task}"] = _calculate(
+                (*before_final, final_score),
+                lambda *items: max(items[:-1]) - items[-1],
+            )
+            backward_transfer_by_stage[f"stage{task}"] = _calculate(
+                (values[task][task], final_score),
+                lambda learned, final: final - learned,
+            )
+
+        zero_shot_by_stage = {
+            f"stage{task}": values[task - 1][task]
+            for task in range(2, final_stage + 1)
+        }
+        learned_score_by_stage = {
+            f"stage{task}": values[task][task]
+            for task in range(2, final_stage + 1)
+        }
+        learning_gain_by_stage = {
+            f"stage{task}": _calculate(
+                (values[task - 1][task], values[task][task]),
+                lambda zero_shot, learned: learned - zero_shot,
+            )
+            for task in range(2, final_stage + 1)
+        }
+
+        result: dict[str, Any] = {
+            "average_after_each_stage": average_after_stage,
+            "final_average": average_after_stage[f"stage{final_stage}"],
+            "average_incremental_performance": _mean(
+                list(average_after_stage.values())
+            ),
+            "forgetting": _mean(list(forgetting_by_stage.values()))
+            if forgetting_by_stage
+            else None,
+            "backward_transfer": _mean(list(backward_transfer_by_stage.values()))
+            if backward_transfer_by_stage
+            else None,
+            "forgetting_by_stage": forgetting_by_stage,
+            "backward_transfer_by_stage": backward_transfer_by_stage,
+            "zero_shot_before_learning": zero_shot_by_stage,
+            "score_after_learning": learned_score_by_stage,
+            "learning_gain_by_stage": learning_gain_by_stage,
+            "average_learning_gain": _mean(list(learning_gain_by_stage.values()))
+            if learning_gain_by_stage
+            else None,
+            "final_stage_after_training": values[final_stage][final_stage],
+        }
+        # Retain the original names so existing two-stage result readers remain
+        # compatible with newly generated two-stage summaries.
+        if final_stage == 2:
+            result.update(
+                {
+                    "average_after_stage1": average_after_stage["stage1"],
+                    "stage2_zero_shot": zero_shot_by_stage["stage2"],
+                    "stage2_after_training": learned_score_by_stage["stage2"],
+                    "stage2_gain": learning_gain_by_stage["stage2"],
+                }
+            )
+        derived[metric] = result
 
     return {
         "definitions": {
             "R_i_j": "base metric on eval Stage j after training through Stage i",
-            "final_average": "(R_2_1 + R_2_2) / 2",
-            "average_incremental_performance": "(R_1_1 + final_average) / 2",
-            "forgetting": "R_1_1 - R_2_1; positive means old-stage loss",
-            "backward_transfer": "R_2_1 - R_1_1; negative means forgetting",
-            "stage2_gain": "R_2_2 - R_1_2",
+            "average_after_each_stage": "A_i = mean(R_i,j for j <= i)",
+            "final_average": "A_T = mean(R_T,j for j = 1..T)",
+            "average_incremental_performance": "mean(A_i for i = 1..T)",
+            "forgetting_by_stage": (
+                "max(R_l,j for l = j..T-1) - R_T,j; positive means loss"
+            ),
+            "forgetting": "mean forgetting over old stages j = 1..T-1",
+            "backward_transfer_by_stage": "R_T,j - R_j,j",
+            "backward_transfer": "mean backward transfer over old stages",
+            "learning_gain_by_stage": "R_j,j - R_(j-1),j for j >= 2",
+            "average_learning_gain": "mean learning gain over Stages 2..T",
         },
+        "number_of_stages": final_stage,
         "performance_matrices": matrices,
         "continual_metrics": derived,
     }
+
+
+def calculate_two_stage_metrics(
+    stage1_summary: dict[str, Any],
+    stage2_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Compatibility wrapper for the original two-stage interface."""
+
+    return calculate_continual_metrics({1: stage1_summary, 2: stage2_summary})

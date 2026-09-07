@@ -38,6 +38,7 @@ class MethodComparisonTests(unittest.TestCase):
         self.assertAlmostEqual(tss["forgetting_reduction"], 0.12)
         self.assertAlmostEqual(tss["final_average_difference"], 0.05)
         self.assertAlmostEqual(tss["stage2_performance_difference"], -0.02)
+        self.assertAlmostEqual(tss["final_stage_performance_difference"], -0.02)
 
     def test_mismatched_controls_are_rejected(self) -> None:
         ewc = summary("ewc", 0.08, 0.50, 0.52)
@@ -46,6 +47,30 @@ class MethodComparisonTests(unittest.TestCase):
         finetune["comparison_controls"]["seed"] = 5
         with self.assertRaisesRegex(ValueError, "controls differ"):
             compare_ewc_with_finetune(ewc, finetune)
+
+    def test_four_stage_comparison_uses_generic_final_stage_metric(self) -> None:
+        ewc = summary("ewc", 0.08, 0.50, 0.52)
+        finetune = summary("finetune", 0.20, 0.45, 0.54)
+        for payload, final, incremental, gain in (
+            (ewc, 0.48, 0.51, 0.30),
+            (finetune, 0.50, 0.47, 0.34),
+        ):
+            payload["comparison_controls"]["stages"] = [1, 2, 3, 4]
+            for metric in ("tss", "hss"):
+                values = payload["continual_metrics"][metric]
+                values["final_stage_after_training"] = final
+                values["average_incremental_performance"] = incremental
+                values["average_learning_gain"] = gain
+
+        result = compare_ewc_with_finetune(ewc, finetune)
+        tss = result["metrics"]["tss"]
+        self.assertEqual(result["number_of_stages"], 4)
+        self.assertAlmostEqual(tss["final_stage_performance_difference"], -0.02)
+        self.assertAlmostEqual(
+            tss["average_incremental_performance_difference"], 0.04
+        )
+        self.assertAlmostEqual(tss["average_learning_gain_difference"], -0.04)
+        self.assertNotIn("stage2_performance_difference", tss)
 
 
 if __name__ == "__main__":

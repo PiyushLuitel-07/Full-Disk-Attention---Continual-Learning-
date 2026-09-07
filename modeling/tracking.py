@@ -227,44 +227,54 @@ class WandbTracker:
             self.run.summary[key] = summary[key]
 
     def log_continual_metrics(self, summary: dict[str, Any]) -> None:
-        """Log formal CL metrics and their underlying four-cell matrix."""
+        """Log formal CL metrics and their complete performance matrix."""
 
         if not self.enabled:
             return
+        number_of_stages = int(summary["number_of_stages"])
+        matrix_columns = [
+            f"R_{trained}_{evaluated}"
+            for trained in range(1, number_of_stages + 1)
+            for evaluated in range(1, number_of_stages + 1)
+        ]
         table = self.wandb.Table(
             columns=[
                 "base_metric",
-                "R_1_1",
-                "R_1_2",
-                "R_2_1",
-                "R_2_2",
+                *matrix_columns,
                 "final_average",
                 "average_incremental_performance",
                 "forgetting",
                 "backward_transfer",
-                "stage2_gain",
+                "average_learning_gain",
             ]
         )
-        payload: dict[str, Any] = {"trained_through_stage": 2}
+        payload: dict[str, Any] = {"trained_through_stage": number_of_stages}
         for base_metric, values in summary["continual_metrics"].items():
             matrix = summary["performance_matrices"][base_metric]
             table.add_data(
                 base_metric,
-                matrix["after_stage1"]["eval_stage1"],
-                matrix["after_stage1"]["eval_stage2"],
-                matrix["after_stage2"]["eval_stage1"],
-                matrix["after_stage2"]["eval_stage2"],
+                *[
+                    matrix[f"after_stage{trained}"][f"eval_stage{evaluated}"]
+                    for trained in range(1, number_of_stages + 1)
+                    for evaluated in range(1, number_of_stages + 1)
+                ],
                 values["final_average"],
                 values["average_incremental_performance"],
                 values["forgetting"],
                 values["backward_transfer"],
-                values["stage2_gain"],
+                values["average_learning_gain"],
             )
             for name, value in values.items():
-                key = f"cl/{base_metric}_{name}"
-                payload[key] = value
-                self.run.summary[key] = value
-        payload["cl/two_stage_summary"] = table
+                if isinstance(value, dict):
+                    for stage_name, stage_value in value.items():
+                        key = f"cl/{base_metric}_{name}/{stage_name}"
+                        payload[key] = stage_value
+                        self.run.summary[key] = stage_value
+                else:
+                    key = f"cl/{base_metric}_{name}"
+                    payload[key] = value
+                    self.run.summary[key] = value
+        payload["cl/performance_matrix_and_summary"] = table
         self.run.log(payload)
 
     def log_forward_transfer(self, summary: dict[str, Any]) -> None:
