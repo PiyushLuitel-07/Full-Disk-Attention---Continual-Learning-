@@ -30,7 +30,8 @@ Kept from the original repository:
 
 Added for continual learning:
 
-- year-based Stage 1 and Stage 2 manifests;
+- year-based manifests for either the original two-stage plan or the four-stage
+  2010--2018 extension;
 - exact per-example empirical diagonal Fisher estimation;
 - classic multi-anchor EWC;
 - stage-by-stage checkpoints and all-seen-stage evaluation;
@@ -146,10 +147,9 @@ What to notice:
 
 ## Weights & Biases experiment tracking
 
-All supplied experiment configurations enable W&B. Stage 1 and Stage 2 are
-logged as separate runs in one group, so the two commands remain independent
-while the continual sequence stays together in the W&B project. Each stage
-logs:
+All supplied experiment configurations enable W&B. Each stage is logged as a
+separate run in one group, so the commands remain independent while the
+continual sequence stays together in the W&B project. Each stage logs:
 
 - learning rate and training CE, EWC, total-loss, TSS/HSS and confusion metrics
   for every epoch;
@@ -440,7 +440,7 @@ float32. This is expected.
 
 This small project is a clear starting point, not the final thesis experiment:
 
-- it implements only Stage 1 and Stage 2;
+- it supports the original two-stage plan and the four-stage 2010--2018 plan;
 - it uses fixed epochs and does not tune on outer evaluation data;
 - the provided lambda `10` is an example, not a validated optimum;
 - Fold 3 is only a debugging fold;
@@ -450,8 +450,9 @@ This small project is a clear starting point, not the final thesis experiment:
   and multiple seeds. Joint/offline training is intentionally outside the
   current project scope.
 
-Keep this code stable until the two-stage real-data run is understood. Then add
-the later stages or baselines as separate, deliberate experiments.
+The completed two-stage real-data run remains a separate experiment. Use new
+manifests and run directories for the four-stage extension so its artifacts do
+not overwrite the original results.
 
 ## Four-stage medium extension foundation
 
@@ -483,9 +484,24 @@ and all 89 FL rows. Weighted sampling will balance training batches.
 
 The matched configurations are `configs/presentation_4stage_ewc.json` and
 `configs/presentation_4stage_finetune.json`. They intentionally use new run
-directories and do not overwrite the completed two-stage experiment. The
-trainer and CL reporting must be generalized in the next implementation step
-before these four-stage configurations can be run.
+directories and do not overwrite the completed two-stage experiment.
+
+After the new manifests and images are ready, run each stage in strict order:
+
+```bash
+python -m modeling.train_continual --config configs/presentation_4stage_ewc.json --stage 1 --device cuda
+python -m modeling.train_continual --config configs/presentation_4stage_ewc.json --stage 2 --device cuda
+python -m modeling.train_continual --config configs/presentation_4stage_ewc.json --stage 3 --device cuda
+python -m modeling.train_continual --config configs/presentation_4stage_ewc.json --stage 4 --device cuda
+```
+
+Stage 3 requires the Stage 2 checkpoint plus an EWC state containing two
+anchors/Fishers. Stage 4 requires the Stage 3 checkpoint plus three accumulated
+anchors/Fishers. Every checkpoint is evaluated on all four chronological
+periods, creating the raw data needed for a 4 × 4 performance matrix. Run the
+same four commands with `presentation_4stage_finetune.json` for the matched
+no-EWC sequence. Formal multi-stage metric aggregation and method comparison
+are added separately; the original two-stage reporting remains unchanged.
 
 ## License note
 

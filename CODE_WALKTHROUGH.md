@@ -90,7 +90,7 @@ The code then stores:
 
 Both are detached float32 tensors and cannot receive future gradients.
 
-## 6. Stage 2 adds the EWC protection
+## 6. Later stages add accumulated EWC protection
 
 Stage 2 constructs the same model and loads Stage 1 weights. It loads the
 Stage 1 anchor/Fisher, but its image loader contains only 2013–2014 rows. There
@@ -114,11 +114,21 @@ stability/plasticity trade-off:
 The supplied `lambda=10` is only a smoke-test setting. It must not be presented
 as scientifically selected.
 
+In the four-stage experiment, Stage 3 loads the Stage 2 checkpoint and the two
+anchors/Fishers accumulated after Stages 1 and 2. Stage 4 similarly loads three
+accumulated anchors/Fishers. The EWC penalty sums protection from every earlier
+stage. Each training command still reads only the current stage's images.
+
+After every checkpoint, inference is run on all four evaluation manifests.
+This includes future periods only to record zero-shot matrix cells; those
+evaluations never update model parameters, Fisher values, or checkpoints.
+
 ### Matched fine-tuning control
 
-When `experiment.method` is `finetune`, Stage 1 and Stage 2 use the identical
-model, chronological data, seed, optimizer, augmentation, and training budget.
-Stage 2 still loads the Stage 1 checkpoint, but the EWC penalty is disabled.
+When `experiment.method` is `finetune`, every stage uses the identical model,
+chronological data, seed, optimizer, augmentation, and training budget as its
+matched EWC run. Each later stage still loads the immediately previous
+checkpoint, but the EWC penalty is disabled.
 Because Fisher information cannot influence this baseline, the trainer skips
 Fisher estimation and does not save an EWC state. This makes fine-tuning the
 direct control needed to determine whether EWC actually reduces forgetting.

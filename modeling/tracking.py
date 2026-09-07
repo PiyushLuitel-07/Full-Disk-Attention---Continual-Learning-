@@ -1,8 +1,8 @@
 """Weights & Biases tracking for one continual-learning stage.
 
-Stage 1 and Stage 2 run as separate commands, so each command receives its own
-W&B run. The runs share one group name, which keeps the complete continual
-sequence together in the W&B interface.
+Each chronological stage runs as a separate command and receives its own W&B
+run. The runs share one group name, which keeps the complete continual sequence
+together in the W&B interface.
 
 The API key is intentionally never read from a configuration file. W&B uses
 the account previously configured with ``wandb login`` on the training server.
@@ -221,6 +221,8 @@ class WandbTracker:
             "elapsed_seconds",
             "checkpoint",
             "ewc_state",
+            "ewc_protected_stages_before_training",
+            "ewc_anchors_after_stage",
         ):
             self.run.summary[key] = summary[key]
 

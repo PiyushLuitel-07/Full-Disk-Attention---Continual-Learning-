@@ -5,9 +5,10 @@ Typical sequence from the project root::
     python -m modeling.train_continual --config configs/pilot.json --stage 1
     python -m modeling.train_continual --config configs/pilot.json --stage 2
 
-For EWC and fine-tuning, Stage 2 refuses to start unless Stage 1's required
-artifacts exist.  The explicit ``stage2_only`` method is the sole exception:
-it starts from random initialization and never loads Stage 1 model weights.
+For EWC and fine-tuning, every stage after Stage 1 refuses to start unless the
+immediately previous stage's required artifacts exist. The explicit
+``stage2_only`` method is the sole exception: it starts from random
+initialization and never loads Stage 1 model weights.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--stage", required=True, type=int, choices=(1, 2))
+    parser.add_argument("--stage", required=True, type=int)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, mps, or cuda:N")
     parser.add_argument(
         "--run-dir",
@@ -81,8 +82,7 @@ def load_config(path: Path) -> dict[str, Any]:
     missing = required_sections - set(config)
     if missing:
         raise ValueError(f"Configuration is missing sections: {sorted(missing)}")
-    if [stage["id"] for stage in config["stages"]] != [1, 2]:
-        raise ValueError("This focused implementation expects exactly stages 1 and 2")
+    validate_stage_plan(config)
     if config["experiment"]["method"] not in {"ewc", "finetune", "stage2_only"}:
         raise ValueError(
             "experiment.method must be 'ewc', 'finetune', or 'stage2_only'"
@@ -95,6 +95,27 @@ def load_config(path: Path) -> dict[str, Any]:
                 f"Enabled W&B tracking is missing settings: {sorted(missing_tracking)}"
             )
     return config
+
+
+def validate_stage_plan(config: dict[str, Any]) -> list[int]:
+    """Validate the supported two- or four-stage chronological plans."""
+
+    stages = config.get("stages")
+    if not isinstance(stages, list):
+        raise ValueError("stages must be a list")
+    ids = [item.get("id") for item in stages if isinstance(item, dict)]
+    if len(ids) != len(stages) or ids not in ([1, 2], [1, 2, 3, 4]):
+        raise ValueError("Stage IDs must be exactly [1, 2] or [1, 2, 3, 4]")
+    previous_end: int | None = None
+    for item in stages:
+        start = int(item["start_year"])
+        end = int(item["end_year"])
+        if start > end:
+            raise ValueError(f"Stage {item['id']} start_year exceeds end_year")
+        if previous_end is not None and start <= previous_end:
+            raise ValueError("Stage year ranges must be chronological and non-overlapping")
+        previous_end = end
+    return ids
 
 
 def select_device(requested: str) -> torch.device:
@@ -318,6 +339,11 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     stage = args.stage
+    configured_stage_ids = validate_stage_plan(config)
+    if stage not in configured_stage_ids:
+        raise ValueError(
+            f"Stage {stage} is not configured; choose one of {configured_stage_ids}"
+        )
     seed = int(config["experiment"]["seed"])
     method = config["experiment"]["method"]
     is_stage2_reference = method == "stage2_only"
@@ -374,19 +400,28 @@ def main() -> None:
         checkpoint = load_torch(previous_checkpoint, device)
         if checkpoint.get("config") != config:
             raise ValueError(
-                "The Stage 2 configuration differs from Stage 1. Use the same "
-                "configuration for one continual sequence, or start a new run directory."
-        )
+                f"The Stage {stage} configuration differs from Stage {stage - 1}. "
+                "Use the same configuration for one continual sequence, or start "
+                "a new run directory."
+            )
         model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         if previous_ewc is not None:
             ewc_state = EWCState.from_state_dict(
                 load_torch(previous_ewc, torch.device("cpu"))
             ).to(device)
+            expected_anchors = stage - 1
+            if len(ewc_state) != expected_anchors:
+                raise ValueError(
+                    f"Stage {stage} requires {expected_anchors} accumulated EWC "
+                    f"anchors, but {previous_ewc} contains {len(ewc_state)}"
+                )
         previous_stage_summary = json.loads(previous_summary.read_text(encoding="utf-8"))
-        if "stage2" not in previous_stage_summary.get("evaluations", {}):
+        current_eval_key = f"stage{stage}"
+        if current_eval_key not in previous_stage_summary.get("evaluations", {}):
             raise ValueError(
-                "The Stage 1 summary lacks the zero-shot Stage 2 evaluation R_1,2. "
-                "Run Stage 1 with the complete-matrix code before starting Stage 2."
+                f"The Stage {stage - 1} summary lacks the zero-shot Stage {stage} "
+                f"evaluation R_{stage - 1},{stage}. Run Stage {stage - 1} with "
+                "complete-matrix evaluation before continuing."
             )
     elif is_stage2_reference:
         source_value = config["paths"].get("source_continual_run_dir")
@@ -509,12 +544,12 @@ def main() -> None:
 
     threshold = float(training["threshold"])
     evaluations: dict[str, Any] = {}
-    # Evaluate every chronological period after every checkpoint. In particular,
-    # after Stage 1 this records R_1,2: zero-shot performance on 2013--2014
-    # before any Stage 2 optimization. Evaluation runs under inference_mode and
-    # never contributes gradients, Fisher values, or checkpoint selection.
+    # Evaluate every configured chronological period after every checkpoint.
+    # Upper-triangle cells are zero-shot measurements on future periods.
+    # Evaluation runs under inference_mode and never contributes gradients,
+    # Fisher values, or checkpoint selection.
     evaluation_stage_ids = (
-        [2] if is_stage2_reference else [item["id"] for item in config["stages"]]
+        [2] if is_stage2_reference else configured_stage_ids
     )
     for evaluated_stage in evaluation_stage_ids:
         eval_samples = read_manifest(manifest_dir / f"stage{evaluated_stage}_eval.csv")
@@ -586,7 +621,7 @@ def main() -> None:
         print(f"Skipping Fisher estimation because method={method}")
 
     continual_result: dict[str, Any] | None = None
-    if stage == 2 and not is_stage2_reference:
+    if len(configured_stage_ids) == 2 and stage == 2 and not is_stage2_reference:
         if previous_stage_summary is None:
             raise AssertionError("Stage 2 requires the Stage 1 summary")
         continual_result = calculate_two_stage_metrics(
@@ -616,6 +651,8 @@ def main() -> None:
         "random_initialization_evaluation": random_baseline,
         "continual_metrics": continual_result,
         "forward_transfer": forward_transfer_result,
+        "ewc_protected_stages_before_training": stage - 1 if use_ewc else 0,
+        "ewc_anchors_after_stage": len(ewc_state) if method == "ewc" else 0,
         "elapsed_seconds": time.time() - start_time,
     }
     atomic_torch_save(checkpoint, checkpoint_path)
@@ -635,6 +672,8 @@ def main() -> None:
         "random_initialization_evaluation": random_baseline,
         "continual_metrics": continual_result,
         "forward_transfer": forward_transfer_result,
+        "ewc_protected_stages_before_training": stage - 1 if use_ewc else 0,
+        "ewc_anchors_after_stage": len(ewc_state) if method == "ewc" else 0,
         "fisher_examples": fisher_count,
         "checkpoint": str(checkpoint_path),
         "ewc_state": str(ewc_path) if ewc_path is not None else None,

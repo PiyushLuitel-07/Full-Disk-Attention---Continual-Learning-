@@ -54,7 +54,24 @@ class EwcTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             EWCState().add_stage(self.model, fisher)
 
+    def test_multiple_stage_anchors_survive_serialization(self) -> None:
+        fisher, _ = estimate_diagonal_fisher(
+            self.model, self.loader, torch.device("cpu")
+        )
+        state = EWCState()
+        state.add_stage(self.model, fisher)
+        with torch.no_grad():
+            self.model.weight.add_(0.25)
+        state.add_stage(self.model, fisher)
+
+        restored = EWCState.from_state_dict(state.state_dict()).to(
+            torch.device("cpu")
+        )
+        self.assertEqual(len(restored), 2)
+        with torch.no_grad():
+            self.model.weight.add_(0.25)
+        self.assertGreater(restored.penalty(self.model).item(), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
-
