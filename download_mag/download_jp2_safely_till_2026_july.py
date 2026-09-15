@@ -14,8 +14,7 @@ import requests
 # ---------------------------------------------------------
 
 START_DATE = '2010-12-01 00:00:00'
-# END_DATE = '2026-07-31 23:59:59'
-END_DATE = '2010-12-07 23:59:59'
+END_DATE = '2026-07-31 23:59:59'
 
 CADENCE_MINUTES = 12
 MAXIMUM_TIME_DIFFERENCE_MINUTES = 12
