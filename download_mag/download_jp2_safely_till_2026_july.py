@@ -13,9 +13,8 @@ import requests
 # Configuration
 # ---------------------------------------------------------
 
-START_DATE = '2010-12-01 00:00:00'
-END_DATE = '2018-12-31 23:59:59'
-
+START_DATE = '2019-01-01 00:00:00'
+END_DATE = '2026-07-31 23:00:00'
 CADENCE_MINUTES = 60
 MAXIMUM_TIME_DIFFERENCE_MINUTES = 12
 MAXIMUM_RETRIES = 5
