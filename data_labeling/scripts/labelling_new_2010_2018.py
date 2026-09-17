@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 IMAGE_DIR = ROOT / "downloaded_data" / "hmi_jpgs"
 GOES_FILE = ROOT / "data_labeling" / "Catalogue" / "goes_flares_catalogue_2010_2018.csv"
 OUTPUT_FILE = ROOT / "data_labeling" / "data_labels" / "labels_2010_2018.csv"

@@ -21,8 +21,8 @@ MAXIMUM_RETRIES = 5
 
 SOURCE_ID = 19
 
-# This file is inside repo/download_mag/, so parent.parent is repo root.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 JP2_DIRECTORY = PROJECT_ROOT / 'downloaded_data' / 'hmi_compressed'
 JPG_DIRECTORY = PROJECT_ROOT / 'downloaded_data' / 'hmi_jpgs'
