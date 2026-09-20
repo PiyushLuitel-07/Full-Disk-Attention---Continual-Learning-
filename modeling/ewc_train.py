@@ -12,7 +12,7 @@ STAGE_DIRECTORY = PROJECT_ROOT / "data_labeling" / "data_labels" / "continual_st
 IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data" / "hmi_jpgs"
 
 IMAGE_SIZE = 256
-BATCH_SIZE = 128
+BATCH_SIZE = 2
 NUM_WORKERS = 8
 EPOCHS = 2
 LEARNING_RATE = 0.001
