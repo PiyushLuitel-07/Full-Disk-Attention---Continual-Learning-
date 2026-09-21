@@ -1,28 +1,120 @@
-#For Confusion Matrix
-from sklearn.metrics import confusion_matrix
+"""Classification metrics used by the training pipelines."""
 
-def sklearn_Compatible_preds_and_targets(model_prediction_list, model_target_list):
-    y_pred_list = []
-    preds = []
-    target_list = []
-    tgts = []
-    y_pred_list = [a.squeeze().tolist() for a in model_prediction_list]
-    preds = [item for sublist in y_pred_list for item in sublist]
-    target_list = [a.squeeze().tolist() for a in model_target_list]
-    tgts = [item for sublist in target_list for item in sublist]
-    return accuracy_score(preds, tgts)
+
+def calculate_classification_metrics(predictions, targets):
+    """Return all binary FL/NF metrics in one dictionary."""
+    if len(predictions) != len(targets):
+        raise ValueError("Predictions and targets must have equal lengths.")
+
+    if not targets:
+        raise ValueError("Cannot calculate metrics from empty inputs.")
+
+    tn = fp = fn = tp = 0
+
+    for prediction, target in zip(predictions, targets):
+        prediction = int(prediction)
+        target = int(target)
+
+        if prediction not in (0, 1) or target not in (0, 1):
+            raise ValueError("Metrics require binary values 0 and 1.")
+
+        if target == 1 and prediction == 1:
+            tp += 1
+        elif target == 0 and prediction == 0:
+            tn += 1
+        elif target == 0 and prediction == 1:
+            fp += 1
+        else:
+            fn += 1
+
+    total = tn + fp + fn + tp
+    accuracy = (tp + tn) / total if total else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall)
+        else 0.0
+    )
+
+    false_positive_rate = (
+        fp / (fp + tn)
+        if (fp + tn)
+        else 0.0
+    )
+    tss = recall - false_positive_rate
+
+    actual_fl = tp + fn
+    actual_nf = tn + fp
+    hss_denominator = (
+        actual_fl * (fn + tn)
+        + (tp + fp) * actual_nf
+    )
+    hss = (
+        2 * (tp * tn - fn * fp) / hss_denominator
+        if hss_denominator
+        else 0.0
+    )
+
+    return {
+        "accuracy": float(accuracy),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "tss": float(tss),
+        "hss": float(hss),
+        "tp": int(tp),
+        "tn": int(tn),
+        "fp": int(fp),
+        "fn": int(fn),
+    }
+
+
+def sklearn_Compatible_preds_and_targets(
+    model_prediction_list,
+    model_target_list,
+):
+    """Compatibility wrapper for the original training code."""
+    predictions = []
+    targets = []
+
+    for batch in model_prediction_list:
+        predictions.extend(
+            batch.detach().cpu().reshape(-1).tolist()
+        )
+
+    for batch in model_target_list:
+        targets.extend(
+            batch.detach().cpu().reshape(-1).tolist()
+        )
+
+    metrics = calculate_classification_metrics(
+        predictions,
+        targets,
+    )
+
+    print(
+        "TP:", metrics["tp"],
+        "FP:", metrics["fp"],
+        "TN:", metrics["tn"],
+        "FN:", metrics["fn"],
+    )
+
+    return metrics["tss"], metrics["hss"]
+
 
 def accuracy_score(prediction, target):
-    TN, FP, FN, TP = confusion_matrix(target, prediction).ravel()
-    print("TP: ", TP, "FP: ", FP, "TN: ", TN, "FN: ", FN)
-    #TSS Computation also known as "recall"
-    tp_rate = TP / float(TP + FN) if TP > 0 else 0  
-    fp_rate = FP / float(FP + TN) if FP > 0 else 0
-    TSS = tp_rate - fp_rate
-    
-    #HSS2 Computation
-    N = TN + FP
-    P = TP + FN
-    HSS = (2 * (TP * TN - FN * FP)) / float((P * (FN + TN) + (TP + FP) * N))
+    """Compatibility wrapper returning the original TSS/HSS tuple."""
+    metrics = calculate_classification_metrics(
+        prediction,
+        target,
+    )
 
-    return TSS, HSS
+    print(
+        "TP:", metrics["tp"],
+        "FP:", metrics["fp"],
+        "TN:", metrics["tn"],
+        "FN:", metrics["fn"],
+    )
+
+    return metrics["tss"], metrics["hss"]
