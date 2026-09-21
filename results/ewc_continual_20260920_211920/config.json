@@ -1,0 +1,29 @@
+{
+  "image_size": 256,
+  "batch_size": 128,
+  "num_workers": 8,
+  "epochs_per_stage": 30,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "ewc_lambda": 1.0,
+  "random_seed": 42,
+  "attention": true,
+  "augmentations": [
+    "original",
+    "horizontal_flip",
+    "vertical_flip",
+    "rotation",
+    "disk_only_polarity_inversion"
+  ],
+  "fisher_data": "complete original stage training data",
+  "stages": [
+    1,
+    2,
+    3
+  ],
+  "stage_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/continual_stages_simplified_labels",
+  "image_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/downloaded_data/hmi_jpgs",
+  "device": "cuda",
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "pytorch_version": "2.13.0+cu130"
+}

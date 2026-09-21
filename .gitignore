@@ -233,3 +233,7 @@ wandb/
 *.pt
 data/jp2_presentation/
 data/pres_jp2/
+
+# Ignore all PyTorch model checkpoint files
+*.pt
+*.pth
