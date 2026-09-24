@@ -24,7 +24,7 @@ STAGE_DIRECTORY = (
     PROJECT_ROOT
     / "data_labeling"
     / "data_labels"
-    / "continual_stages_simplified_labels"
+    / "continual_stages_2010_2023_candidate_A"
 )
 IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIRECTORY = PROJECT_ROOT / "results"
@@ -206,6 +206,12 @@ def main():
         ],
         "fisher_data": "complete original stage training data",
         "stages": stage_numbers,
+        "stage_periods": {
+            1: "2010-2018",
+            2: "2019-2022",
+            3: "2023",
+        },
+        "normalization": "0_to_1_scaling",
         "stage_directory": str(STAGE_DIRECTORY),
         "image_directory": str(IMAGE_DIRECTORY),
         "device": str(device),
