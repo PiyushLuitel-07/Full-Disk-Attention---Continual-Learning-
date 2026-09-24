@@ -619,3 +619,45 @@ def build_stage_loaders(
         "holdout": holdout_loader,
         "fisher": fisher_loader,
     }
+
+
+# ---------------------------------------------------------------------
+# 8. BUILD A PLAIN EVALUATION LOADER
+# ---------------------------------------------------------------------
+
+def build_evaluation_loader(
+    csv_file,
+    image_directory,
+    batch_size=128,
+    image_size=256,
+    num_workers=4,
+    pin_memory=True,
+):
+    """
+    Build an untouched DataLoader for validation or testing.
+
+    Both classes retain their natural distribution. Images are resized
+    and converted to tensors, without augmentation or repetition.
+    """
+
+    evaluation_data = MagnetogramDataset(
+        csv_file=csv_file,
+        image_directory=image_directory,
+        transform=BasicTransform(image_size=image_size),
+        class_value=None,
+    )
+
+    loader_settings = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+    }
+
+    if num_workers > 0:
+        loader_settings["persistent_workers"] = True
+
+    return DataLoader(
+        evaluation_data,
+        shuffle=False,
+        **loader_settings,
+    )
