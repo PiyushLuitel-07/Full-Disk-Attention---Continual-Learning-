@@ -173,12 +173,43 @@ def main():
         },
     )
 
+    confusion_table = wandb.Table(
+        columns=["Outcome", "Count"],
+        data=[
+            ["True positive", metrics["tp"]],
+            ["True negative", metrics["tn"]],
+            ["False positive", metrics["fp"]],
+            ["False negative", metrics["fn"]],
+        ],
+    )
+
     run.log(
         {
-            f"{dataset_name}/{name}": value
-            for name, value in metrics.items()
+            **{
+                f"{dataset_name}/{name}": value
+                for name, value in metrics.items()
+            },
+            f"{dataset_name}/confusion_counts": wandb.plot.bar(
+                confusion_table,
+                "Outcome",
+                "Count",
+                title=f"{dataset_name}: prediction outcomes",
+            ),
         }
     )
+
+    summary_metrics = (
+        "loss",
+        "accuracy",
+        "precision",
+        "recall",
+        "f1",
+        "tss",
+        "hss",
+    )
+    for name in summary_metrics:
+        run.summary[f"final/{dataset_name}_{name}"] = metrics[name]
+
     run.finish()
 
     print(f"Device: {device}")

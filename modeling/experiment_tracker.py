@@ -22,6 +22,8 @@ class ExperimentTracker:
         self.epoch_csv = self.directory / "epoch_metrics.csv"
         self.holdout_csv = self.directory / "holdout_metrics.csv"
         self.stage_csv = self.directory / "stage_metrics.csv"
+        self.best_holdout_tss = {}
+        self.best_holdout_hss = {}
 
         with (self.directory / "config.json").open("w") as config_file:
             json.dump(config, config_file, indent=2)
@@ -45,6 +47,10 @@ class ExperimentTracker:
         self.run.define_metric("completed_stage")
         self.run.define_metric(
             "retention/*",
+            step_metric="completed_stage",
+        )
+        self.run.define_metric(
+            "forgetting/*",
             step_metric="completed_stage",
         )
 
@@ -137,12 +143,41 @@ class ExperimentTracker:
         wandb_values = {"completed_stage": after_training_stage}
 
         for evaluated_stage, metrics in holdout_results.items():
+            previous_best_tss = self.best_holdout_tss.get(
+                evaluated_stage,
+                metrics["tss"],
+            )
+            previous_best_hss = self.best_holdout_hss.get(
+                evaluated_stage,
+                metrics["hss"],
+            )
+
+            tss_forgetting = max(
+                0.0,
+                previous_best_tss - metrics["tss"],
+            )
+            hss_forgetting = max(
+                0.0,
+                previous_best_hss - metrics["hss"],
+            )
+
+            self.best_holdout_tss[evaluated_stage] = max(
+                previous_best_tss,
+                metrics["tss"],
+            )
+            self.best_holdout_hss[evaluated_stage] = max(
+                previous_best_hss,
+                metrics["hss"],
+            )
+
             self._append_csv(
                 self.holdout_csv,
                 {
                     "after_training_stage": after_training_stage,
                     "evaluated_stage": evaluated_stage,
                     **metrics,
+                    "tss_forgetting": tss_forgetting,
+                    "hss_forgetting": hss_forgetting,
                 },
             )
 
@@ -150,6 +185,48 @@ class ExperimentTracker:
                 wandb_values[
                     f"retention/stage_{evaluated_stage}_{name}"
                 ] = value
+
+            wandb_values[
+                f"forgetting/stage_{evaluated_stage}_tss"
+            ] = tss_forgetting
+            wandb_values[
+                f"forgetting/stage_{evaluated_stage}_hss"
+            ] = hss_forgetting
+
+            confusion_table = wandb.Table(
+                columns=["Outcome", "Count"],
+                data=[
+                    ["True positive", metrics["tp"]],
+                    ["True negative", metrics["tn"]],
+                    ["False positive", metrics["fp"]],
+                    ["False negative", metrics["fn"]],
+                ],
+            )
+            wandb_values[
+                "confusion_counts/"
+                f"after_stage_{after_training_stage}_"
+                f"on_stage_{evaluated_stage}"
+            ] = wandb.plot.bar(
+                confusion_table,
+                "Outcome",
+                "Count",
+                title=(
+                    f"After Stage {after_training_stage}: "
+                    f"Stage {evaluated_stage} holdout"
+                ),
+            )
+
+            for name in ("loss", "f1", "tss", "hss"):
+                self.run.summary[
+                    f"latest_retention/stage_{evaluated_stage}_{name}"
+                ] = metrics[name]
+
+            self.run.summary[
+                f"latest_forgetting/stage_{evaluated_stage}_tss"
+            ] = tss_forgetting
+            self.run.summary[
+                f"latest_forgetting/stage_{evaluated_stage}_hss"
+            ] = hss_forgetting
 
         self.run.log(wandb_values)
 
