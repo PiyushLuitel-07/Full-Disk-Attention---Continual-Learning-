@@ -1,5 +1,7 @@
 """Classification metrics used by the training pipelines."""
 
+import torch
+
 
 def calculate_classification_metrics(predictions, targets):
     """Return all binary FL/NF metrics in one dictionary."""
@@ -68,6 +70,35 @@ def calculate_classification_metrics(predictions, targets):
         "fp": int(fp),
         "fn": int(fn),
     }
+
+
+def evaluate(model, data_loader, criterion, device):
+    """Evaluate a model without updating its parameters."""
+    model.eval()
+
+    total_loss = 0.0
+    number_of_images = 0
+    predictions = []
+    targets = []
+
+    with torch.no_grad():
+        for images, batch_targets in data_loader:
+            images = images.to(device, non_blocking=True)
+            batch_targets = batch_targets.to(device, non_blocking=True)
+
+            scores = model(images)[0]
+            loss = criterion(scores, batch_targets)
+            batch_size = images.size(0)
+
+            total_loss += loss.item() * batch_size
+            number_of_images += batch_size
+            predictions.extend(scores.argmax(dim=1).cpu().tolist())
+            targets.extend(batch_targets.cpu().tolist())
+
+    metrics = calculate_classification_metrics(predictions, targets)
+    metrics["loss"] = total_loss / number_of_images
+
+    return metrics
 
 
 def sklearn_Compatible_preds_and_targets(

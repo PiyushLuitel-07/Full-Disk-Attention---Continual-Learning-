@@ -10,7 +10,7 @@ from torch.optim import SGD
 
 from attention_model import Attn_Net
 from dataloader import build_stage_loaders, discover_stages
-from evaluation import calculate_classification_metrics
+from evaluation import calculate_classification_metrics, evaluate
 from ewc import calculate_fisher, ewc_penalty, save_parameters
 from experiment_tracker import ExperimentTracker
 
@@ -99,38 +99,6 @@ def train_one_epoch(
 
     for name, value in loss_sums.items():
         metrics[name] = value / number_of_images
-
-    return metrics
-
-
-# ---------------------------------------------------------------------
-# 3. EVALUATE ONE HOLDOUT
-# ---------------------------------------------------------------------
-
-def evaluate(model, data_loader, criterion, device):
-    model.eval()
-
-    total_loss = 0.0
-    number_of_images = 0
-    predictions = []
-    targets = []
-
-    with torch.no_grad():
-        for images, batch_targets in data_loader:
-            images = images.to(device, non_blocking=True)
-            batch_targets = batch_targets.to(device, non_blocking=True)
-
-            scores = model(images)[0]
-            loss = criterion(scores, batch_targets)
-            batch_size = images.size(0)
-
-            total_loss += loss.item() * batch_size
-            number_of_images += batch_size
-            predictions.extend(scores.argmax(dim=1).cpu().tolist())
-            targets.extend(batch_targets.cpu().tolist())
-
-    metrics = calculate_classification_metrics(predictions, targets)
-    metrics["loss"] = total_loss / number_of_images
 
     return metrics
 
