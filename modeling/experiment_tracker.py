@@ -244,11 +244,16 @@ class ExperimentTracker:
             self.checkpoint_directory
             / f"stage{stage_number}.pt"
         )
+        model_to_save = (
+            model.module
+            if isinstance(model, torch.nn.DataParallel)
+            else model
+        )
 
         torch.save(
             {
                 "completed_stage": stage_number,
-                "model_state_dict": model.state_dict(),
+                "model_state_dict": model_to_save.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "ewc_history": self._history_on_cpu(ewc_history),
                 "config": self.config,

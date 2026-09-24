@@ -142,17 +142,23 @@ def main():
         torch.cuda.manual_seed_all(RANDOM_SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    gpu_name = (
-        torch.cuda.get_device_name(0)
+    gpu_names = (
+        [
+            torch.cuda.get_device_name(index)
+            for index in range(torch.cuda.device_count())
+        ]
         if torch.cuda.is_available()
-        else "CPU"
+        else ["CPU"]
     )
+    number_of_gpus = torch.cuda.device_count()
 
     stages = discover_stages(STAGE_DIRECTORY)
     stage_numbers = [stage["number"] for stage in stages]
 
     print(f"Device: {device}")
-    print(f"GPU: {gpu_name}")
+    print(f"GPUs available to PyTorch: {number_of_gpus}")
+    for index, gpu_name in enumerate(gpu_names):
+        print(f"  GPU {index}: {gpu_name}")
     print(f"Stages discovered: {stage_numbers}")
 
     config = {
@@ -183,7 +189,11 @@ def main():
         "stage_directory": str(STAGE_DIRECTORY),
         "image_directory": str(IMAGE_DIRECTORY),
         "device": str(device),
-        "gpu": gpu_name,
+        "number_of_gpus": number_of_gpus,
+        "gpus": gpu_names,
+        "multi_gpu_method": (
+            "DataParallel" if number_of_gpus > 1 else "single_device"
+        ),
         "pytorch_version": torch.__version__,
     }
 
@@ -199,6 +209,11 @@ def main():
             attention=True,
             init="kaimingUniform",
         ).to(device)
+
+        if number_of_gpus > 1:
+            model = nn.DataParallel(model)
+            print(f"Using DataParallel on {number_of_gpus} GPUs")
+
         criterion = nn.CrossEntropyLoss()
         ewc_history = []
         holdout_loaders = {}
