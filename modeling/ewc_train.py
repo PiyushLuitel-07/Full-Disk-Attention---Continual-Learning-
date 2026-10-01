@@ -24,7 +24,7 @@ STAGE_DIRECTORY = (
     PROJECT_ROOT
     / "data_labeling"
     / "data_labels"
-    / "continual_stages_2010_2023_candidate_A"
+    / "continual_stages_2010_2024_revised_chronological"
 )
 IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIRECTORY = PROJECT_ROOT / "results"
@@ -38,7 +38,7 @@ WANDB_PROJECT = (
 IMAGE_SIZE = 256
 BATCH_SIZE = 128
 NUM_WORKERS = 8
-EPOCHS_PER_STAGE = 30
+EPOCHS_PER_STAGE = 1
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.0001
 EWC_LAMBDA = 1.0
