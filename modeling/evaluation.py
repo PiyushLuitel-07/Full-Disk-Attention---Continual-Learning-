@@ -57,6 +57,8 @@ def calculate_classification_metrics(predictions, targets):
         if hss_denominator
         else 0.0
     )
+    skill_product = tss * hss
+    css = skill_product ** 0.5 if skill_product >= 0 else 0.0
 
     return {
         "accuracy": float(accuracy),
@@ -65,6 +67,7 @@ def calculate_classification_metrics(predictions, targets):
         "f1": float(f1),
         "tss": float(tss),
         "hss": float(hss),
+        "css": float(css),
         "tp": int(tp),
         "tn": int(tn),
         "fp": int(fp),

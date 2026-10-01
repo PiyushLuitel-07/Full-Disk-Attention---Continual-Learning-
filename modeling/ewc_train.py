@@ -124,7 +124,8 @@ def evaluate_learned_stages(
             f"recall={metrics['recall']:.4f} | "
             f"F1={metrics['f1']:.4f} | "
             f"TSS={metrics['tss']:.4f} | "
-            f"HSS={metrics['hss']:.4f}"
+            f"HSS={metrics['hss']:.4f} | "
+            f"CSS={metrics['css']:.4f}"
         )
 
     return results
@@ -276,8 +277,9 @@ def main():
                     f"Epoch {stage_epoch}/{EPOCHS_PER_STAGE} | "
                     f"loss={train_metrics['loss']:.4f} | "
                     f"EWC={train_metrics['ewc_loss']:.4f} | "
-                    f"holdout TSS={holdout_metrics['tss']:.4f} | "
+                    f"holdout CSS={holdout_metrics['css']:.4f} | "
                     f"holdout HSS={holdout_metrics['hss']:.4f} | "
+                    f"holdout TSS={holdout_metrics['tss']:.4f} | "
                     f"time={epoch_seconds:.1f}s"
                 )
 

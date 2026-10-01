@@ -206,6 +206,7 @@ def main():
         "f1",
         "tss",
         "hss",
+        "css",
     )
     for name in summary_metrics:
         run.summary[f"final/{dataset_name}_{name}"] = metrics[name]
