@@ -181,9 +181,9 @@ def main():
         "fisher_data": "complete original stage training data",
         "stages": stage_numbers,
         "stage_periods": {
-            1: "2010-2018",
-            2: "2019-2022",
-            3: "2023",
+            1: "2010-12 to 2017-12",
+            2: "2018-01 to 2023-06",
+            3: "2023-06 to 2024-06",
         },
         "normalization": "0_to_1_scaling",
         "stage_directory": str(STAGE_DIRECTORY),
