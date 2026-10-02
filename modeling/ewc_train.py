@@ -249,6 +249,9 @@ def main():
                 lr=learning_rate,
                 weight_decay=weight_decay,
             )
+            best_holdout_css = float("-inf")
+            best_stage_epoch = None
+            best_checkpoint = None
 
             for stage_epoch in range(1, epochs_per_stage + 1):
                 global_epoch += 1
@@ -281,6 +284,17 @@ def main():
                     epoch_seconds,
                 )
 
+                if holdout_metrics["css"] > best_holdout_css:
+                    best_holdout_css = holdout_metrics["css"]
+                    best_stage_epoch = stage_epoch
+                    best_checkpoint = tracker.save_best_stage_model(
+                        model,
+                        optimizer,
+                        stage_number,
+                        stage_epoch,
+                        best_holdout_css,
+                    )
+
                 print(
                     f"Epoch {stage_epoch}/{epochs_per_stage} | "
                     f"loss={train_metrics['loss']:.4f} | "
@@ -290,6 +304,18 @@ def main():
                     f"holdout TSS={holdout_metrics['tss']:.4f} | "
                     f"time={epoch_seconds:.1f}s"
                 )
+
+            restored_checkpoint = tracker.restore_best_stage_model(
+                best_checkpoint,
+                model,
+                optimizer,
+                device,
+            )
+            print(
+                f"Restored Stage {stage_number} best checkpoint from "
+                f"epoch {restored_checkpoint['stage_epoch']} "
+                f"(holdout CSS={restored_checkpoint['holdout_css']:.4f})"
+            )
 
             holdout_results = evaluate_learned_stages(
                 model,
@@ -319,6 +345,8 @@ def main():
                 stage_number,
                 loaders,
                 fisher_seconds,
+                best_stage_epoch,
+                best_holdout_css,
             )
             print(f"Stage {stage_number} completed: {checkpoint}")
 

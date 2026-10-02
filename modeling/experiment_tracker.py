@@ -250,6 +250,62 @@ class ExperimentTracker:
 
         self.run.log(wandb_values)
 
+    def save_best_stage_model(
+        self,
+        model,
+        optimizer,
+        stage_number,
+        stage_epoch,
+        holdout_css,
+    ):
+        """Save the best model observed within one training stage."""
+        checkpoint_path = (
+            self.checkpoint_directory
+            / f"stage{stage_number}_best.pt"
+        )
+        model_to_save = (
+            model.module
+            if isinstance(model, torch.nn.DataParallel)
+            else model
+        )
+
+        torch.save(
+            {
+                "stage": stage_number,
+                "stage_epoch": stage_epoch,
+                "holdout_css": holdout_css,
+                "model_state_dict": model_to_save.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "config": self.config,
+            },
+            checkpoint_path,
+        )
+
+        return checkpoint_path
+
+    @staticmethod
+    def restore_best_stage_model(
+        checkpoint_path,
+        model,
+        optimizer,
+        device,
+    ):
+        """Restore the model and optimizer from a best-stage checkpoint."""
+        checkpoint = torch.load(
+            checkpoint_path,
+            map_location=device,
+            weights_only=False,
+        )
+        model_to_restore = (
+            model.module
+            if isinstance(model, torch.nn.DataParallel)
+            else model
+        )
+        model_to_restore.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        return checkpoint
+
     def save_stage(
         self,
         model,
@@ -258,6 +314,8 @@ class ExperimentTracker:
         stage_number,
         loaders,
         fisher_seconds,
+        best_stage_epoch,
+        best_holdout_css,
     ):
         """Save one stage checkpoint and its stage-level information."""
         checkpoint_path = (
@@ -287,6 +345,8 @@ class ExperimentTracker:
             "original_fisher_samples": len(loaders["fisher"].dataset),
             "holdout_samples": len(loaders["holdout"].dataset),
             "fisher_seconds": fisher_seconds,
+            "best_stage_epoch": best_stage_epoch,
+            "best_holdout_css": best_holdout_css,
             "checkpoint": str(checkpoint_path),
         }
         self._append_csv(self.stage_csv, stage_metrics)
