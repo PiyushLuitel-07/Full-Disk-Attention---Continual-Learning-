@@ -22,6 +22,7 @@ class ExperimentTracker:
         self.epoch_csv = self.directory / "epoch_metrics.csv"
         self.holdout_csv = self.directory / "holdout_metrics.csv"
         self.stage_csv = self.directory / "stage_metrics.csv"
+        self.validation_csv = self.directory / "validation_metrics.csv"
         self.best_holdout_tss = {}
         self.best_holdout_hss = {}
         self.best_holdout_css = {}
@@ -249,6 +250,28 @@ class ExperimentTracker:
             ] = css_forgetting
 
         self.run.log(wandb_values)
+
+    def log_validation(self, metrics, samples, label_csv):
+        """Save final validation metrics for this complete training run."""
+        self._append_csv(
+            self.validation_csv,
+            {
+                "dataset": "validation_2024_2025",
+                "samples": samples,
+                "label_csv": str(label_csv),
+                **metrics,
+            },
+        )
+
+        self.run.log(
+            {
+                f"validation/{name}": value
+                for name, value in metrics.items()
+            }
+        )
+
+        for name, value in metrics.items():
+            self.run.summary[f"validation/{name}"] = value
 
     def save_best_stage_model(
         self,

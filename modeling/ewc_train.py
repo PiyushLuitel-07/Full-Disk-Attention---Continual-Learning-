@@ -10,7 +10,11 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from attention_model import Attn_Net
-from dataloader import build_stage_loaders, discover_stages
+from dataloader import (
+    build_evaluation_loader,
+    build_stage_loaders,
+    discover_stages,
+)
 from evaluation import calculate_classification_metrics, evaluate
 from ewc import calculate_fisher, ewc_penalty, save_parameters
 from experiment_tracker import ExperimentTracker
@@ -29,6 +33,14 @@ STAGE_DIRECTORY = (
 )
 IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIRECTORY = PROJECT_ROOT / "results"
+VALIDATION_CSV = (
+    PROJECT_ROOT
+    / "data_labeling"
+    / "data_labels"
+    / "future_evaluation_labels"
+    / "revised_chronological_2024_2026"
+    / "validation_2024_2025.csv"
+)
 
 WANDB_ENTITY = "piyush-luitel-texas-christian-university"
 WANDB_PROJECT = (
@@ -200,6 +212,7 @@ def main():
         },
         "normalization": "0_to_1_scaling",
         "stage_directory": str(STAGE_DIRECTORY),
+        "validation_csv": str(VALIDATION_CSV),
         "image_directory": str(IMAGE_DIRECTORY),
         "device": str(device),
         "number_of_gpus": number_of_gpus,
@@ -416,6 +429,34 @@ def main():
                 stopped_early,
             )
             print(f"Stage {stage_number} completed: {checkpoint}")
+
+        print("\nEvaluating final model on 2024-2025 validation data...")
+        validation_loader = build_evaluation_loader(
+            csv_file=VALIDATION_CSV,
+            image_directory=IMAGE_DIRECTORY,
+            batch_size=batch_size,
+            image_size=IMAGE_SIZE,
+            num_workers=NUM_WORKERS,
+            pin_memory=device.type == "cuda",
+        )
+        validation_metrics = evaluate(
+            model,
+            validation_loader,
+            criterion,
+            device,
+        )
+        tracker.log_validation(
+            validation_metrics,
+            len(validation_loader.dataset),
+            VALIDATION_CSV,
+        )
+        print(
+            "Validation | "
+            f"CSS={validation_metrics['css']:.4f} | "
+            f"TSS={validation_metrics['tss']:.4f} | "
+            f"HSS={validation_metrics['hss']:.4f} | "
+            f"loss={validation_metrics['loss']:.4f}"
+        )
 
         print("\nAll continual-learning stages completed.")
         print(f"Local results: {tracker.directory}")
