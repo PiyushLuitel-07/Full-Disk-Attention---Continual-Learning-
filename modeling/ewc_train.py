@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 from torch import nn
 from torch.optim import SGD
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from attention_model import Attn_Net
 from dataloader import build_stage_loaders, discover_stages
@@ -44,6 +45,9 @@ WEIGHT_DECAY = 0.0001
 EWC_LAMBDA = 1.0
 EARLY_STOPPING_PATIENCE = 6
 EARLY_STOPPING_MIN_DELTA = 0.002
+SCHEDULER_FACTOR = 0.3
+SCHEDULER_PATIENCE = 2
+MIN_LEARNING_RATE = 0.000001
 RANDOM_SEED = 42
 
 
@@ -175,6 +179,9 @@ def main():
         "ewc_lambda": EWC_LAMBDA,
         "early_stopping_patience": EARLY_STOPPING_PATIENCE,
         "early_stopping_min_delta": EARLY_STOPPING_MIN_DELTA,
+        "scheduler_factor": SCHEDULER_FACTOR,
+        "scheduler_patience": SCHEDULER_PATIENCE,
+        "min_learning_rate": MIN_LEARNING_RATE,
         "random_seed": RANDOM_SEED,
         "attention": True,
         "augmentations": [
@@ -220,6 +227,11 @@ def main():
         early_stopping_min_delta = float(
             tracker.config["early_stopping_min_delta"]
         )
+        scheduler_factor = float(tracker.config["scheduler_factor"])
+        scheduler_patience = int(tracker.config["scheduler_patience"])
+        min_learning_rate = float(
+            tracker.config["min_learning_rate"]
+        )
 
         model = Attn_Net(
             im_size=IMAGE_SIZE,
@@ -258,6 +270,15 @@ def main():
                 model.parameters(),
                 lr=learning_rate,
                 weight_decay=weight_decay,
+            )
+            scheduler = ReduceLROnPlateau(
+                optimizer,
+                mode="max",
+                factor=scheduler_factor,
+                patience=scheduler_patience,
+                threshold=early_stopping_min_delta,
+                threshold_mode="abs",
+                min_lr=min_learning_rate,
             )
             best_holdout_css = float("-inf")
             best_stage_epoch = None
@@ -313,6 +334,17 @@ def main():
                     )
                 else:
                     epochs_without_improvement += 1
+
+                learning_rate_before_step = optimizer.param_groups[0]["lr"]
+                scheduler.step(holdout_metrics["css"])
+                learning_rate_after_step = optimizer.param_groups[0]["lr"]
+
+                if learning_rate_after_step < learning_rate_before_step:
+                    print(
+                        "Reduced learning rate from "
+                        f"{learning_rate_before_step:.6g} to "
+                        f"{learning_rate_after_step:.6g}"
+                    )
 
                 print(
                     f"Epoch {stage_epoch}/{epochs_per_stage} | "
