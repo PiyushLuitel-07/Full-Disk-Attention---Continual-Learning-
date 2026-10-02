@@ -316,6 +316,8 @@ class ExperimentTracker:
         fisher_seconds,
         best_stage_epoch,
         best_holdout_css,
+        stopping_epoch,
+        stopped_early,
     ):
         """Save one stage checkpoint and its stage-level information."""
         checkpoint_path = (
@@ -347,6 +349,8 @@ class ExperimentTracker:
             "fisher_seconds": fisher_seconds,
             "best_stage_epoch": best_stage_epoch,
             "best_holdout_css": best_holdout_css,
+            "stopping_epoch": stopping_epoch,
+            "stopped_early": stopped_early,
             "checkpoint": str(checkpoint_path),
         }
         self._append_csv(self.stage_csv, stage_metrics)

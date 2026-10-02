@@ -42,6 +42,8 @@ EPOCHS_PER_STAGE = 30
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.0001
 EWC_LAMBDA = 1.0
+EARLY_STOPPING_PATIENCE = 6
+EARLY_STOPPING_MIN_DELTA = 0.002
 RANDOM_SEED = 42
 
 
@@ -171,6 +173,8 @@ def main():
         "learning_rate": LEARNING_RATE,
         "weight_decay": WEIGHT_DECAY,
         "ewc_lambda": EWC_LAMBDA,
+        "early_stopping_patience": EARLY_STOPPING_PATIENCE,
+        "early_stopping_min_delta": EARLY_STOPPING_MIN_DELTA,
         "random_seed": RANDOM_SEED,
         "attention": True,
         "augmentations": [
@@ -210,6 +214,12 @@ def main():
         learning_rate = float(tracker.config["learning_rate"])
         weight_decay = float(tracker.config["weight_decay"])
         ewc_lambda = float(tracker.config["ewc_lambda"])
+        early_stopping_patience = int(
+            tracker.config["early_stopping_patience"]
+        )
+        early_stopping_min_delta = float(
+            tracker.config["early_stopping_min_delta"]
+        )
 
         model = Attn_Net(
             im_size=IMAGE_SIZE,
@@ -252,6 +262,9 @@ def main():
             best_holdout_css = float("-inf")
             best_stage_epoch = None
             best_checkpoint = None
+            epochs_without_improvement = 0
+            stopped_early = False
+            stopping_epoch = epochs_per_stage
 
             for stage_epoch in range(1, epochs_per_stage + 1):
                 global_epoch += 1
@@ -284,9 +297,13 @@ def main():
                     epoch_seconds,
                 )
 
-                if holdout_metrics["css"] > best_holdout_css:
+                if (
+                    holdout_metrics["css"]
+                    > best_holdout_css + early_stopping_min_delta
+                ):
                     best_holdout_css = holdout_metrics["css"]
                     best_stage_epoch = stage_epoch
+                    epochs_without_improvement = 0
                     best_checkpoint = tracker.save_best_stage_model(
                         model,
                         optimizer,
@@ -294,6 +311,8 @@ def main():
                         stage_epoch,
                         best_holdout_css,
                     )
+                else:
+                    epochs_without_improvement += 1
 
                 print(
                     f"Epoch {stage_epoch}/{epochs_per_stage} | "
@@ -304,6 +323,20 @@ def main():
                     f"holdout TSS={holdout_metrics['tss']:.4f} | "
                     f"time={epoch_seconds:.1f}s"
                 )
+
+                if (
+                    epochs_without_improvement
+                    >= early_stopping_patience
+                ):
+                    stopped_early = True
+                    stopping_epoch = stage_epoch
+                    print(
+                        f"Early stopping Stage {stage_number} at epoch "
+                        f"{stage_epoch}: holdout CSS did not improve by "
+                        f"at least {early_stopping_min_delta:.4f} for "
+                        f"{early_stopping_patience} epochs."
+                    )
+                    break
 
             restored_checkpoint = tracker.restore_best_stage_model(
                 best_checkpoint,
@@ -347,6 +380,8 @@ def main():
                 fisher_seconds,
                 best_stage_epoch,
                 best_holdout_css,
+                stopping_epoch,
+                stopped_early,
             )
             print(f"Stage {stage_number} completed: {checkpoint}")
 
