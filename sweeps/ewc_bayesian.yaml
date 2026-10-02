@@ -1,0 +1,51 @@
+program: modeling/ewc_train.py
+method: bayes
+
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.01
+
+  ewc_lambda:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 100.0
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.000001
+    max: 0.01
+
+  batch_size:
+    values:
+      - 64
+      - 128
+      - 256
+
+  epochs_per_stage:
+    value: 40
+
+  early_stopping_patience:
+    value: 6
+
+  early_stopping_min_delta:
+    value: 0.002
+
+  scheduler_factor:
+    value: 0.3
+
+  scheduler_patience:
+    value: 2
+
+  min_learning_rate:
+    value: 0.000001
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
