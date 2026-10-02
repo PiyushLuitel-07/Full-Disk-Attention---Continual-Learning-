@@ -56,6 +56,7 @@ def train_one_epoch(
     optimizer,
     device,
     ewc_history,
+    ewc_lambda,
 ):
     model.train()
 
@@ -77,7 +78,7 @@ def train_one_epoch(
         scores = model(images)[0]
         classification_loss = criterion(scores, batch_targets)
         ewc_loss = (
-            EWC_LAMBDA / 2.0
+            ewc_lambda / 2.0
         ) * ewc_penalty(model, ewc_history)
         loss = classification_loss + ewc_loss
 
@@ -204,6 +205,12 @@ def main():
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
     ) as tracker:
+        batch_size = int(tracker.config["batch_size"])
+        epochs_per_stage = int(tracker.config["epochs_per_stage"])
+        learning_rate = float(tracker.config["learning_rate"])
+        weight_decay = float(tracker.config["weight_decay"])
+        ewc_lambda = float(tracker.config["ewc_lambda"])
+
         model = Attn_Net(
             im_size=IMAGE_SIZE,
             num_classes=2,
@@ -230,7 +237,7 @@ def main():
                 train_csv=stage["train_file"],
                 holdout_csv=stage["holdout_file"],
                 image_directory=IMAGE_DIRECTORY,
-                batch_size=BATCH_SIZE,
+                batch_size=batch_size,
                 image_size=IMAGE_SIZE,
                 num_workers=NUM_WORKERS,
                 pin_memory=device.type == "cuda",
@@ -239,11 +246,11 @@ def main():
 
             optimizer = SGD(
                 model.parameters(),
-                lr=LEARNING_RATE,
-                weight_decay=WEIGHT_DECAY,
+                lr=learning_rate,
+                weight_decay=weight_decay,
             )
 
-            for stage_epoch in range(1, EPOCHS_PER_STAGE + 1):
+            for stage_epoch in range(1, epochs_per_stage + 1):
                 global_epoch += 1
                 epoch_start = time.perf_counter()
 
@@ -254,6 +261,7 @@ def main():
                     optimizer,
                     device,
                     ewc_history,
+                    ewc_lambda,
                 )
                 holdout_metrics = evaluate(
                     model,
@@ -274,7 +282,7 @@ def main():
                 )
 
                 print(
-                    f"Epoch {stage_epoch}/{EPOCHS_PER_STAGE} | "
+                    f"Epoch {stage_epoch}/{epochs_per_stage} | "
                     f"loss={train_metrics['loss']:.4f} | "
                     f"EWC={train_metrics['ewc_loss']:.4f} | "
                     f"holdout CSS={holdout_metrics['css']:.4f} | "

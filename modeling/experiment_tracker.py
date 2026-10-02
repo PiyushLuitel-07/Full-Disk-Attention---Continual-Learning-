@@ -26,10 +26,6 @@ class ExperimentTracker:
         self.best_holdout_hss = {}
         self.best_holdout_css = {}
 
-        with (self.directory / "config.json").open("w") as config_file:
-            json.dump(config, config_file, indent=2)
-
-        self.config = config
         self.run = wandb.init(
             entity=entity,
             project=project,
@@ -38,6 +34,10 @@ class ExperimentTracker:
             dir=str(self.directory),
             tags=["EWC", "continual-learning", "prototype"],
         )
+        self.config = dict(self.run.config)
+
+        with (self.directory / "config.json").open("w") as config_file:
+            json.dump(self.config, config_file, indent=2)
 
         self.run.define_metric("global_epoch")
         self.run.define_metric("training/*", step_metric="global_epoch")
