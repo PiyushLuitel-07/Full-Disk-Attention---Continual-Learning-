@@ -1,0 +1,4 @@
+stage,balanced_training_samples,original_fisher_samples,holdout_samples,fisher_seconds,best_stage_epoch,best_holdout_css,stopping_epoch,stopped_early,checkpoint
+1,75986,46638,8230,30.10036621056497,6,0.5078759650840553,12,True,/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/ewc_continual_20261001_225735/checkpoints/stage1.pt
+2,75530,39760,7016,25.988047231920063,2,0.23981645162209458,8,True,/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/ewc_continual_20261001_225735/checkpoints/stage2.pt
+3,8474,7352,1273,5.9523210460320115,5,0.1129835402341336,11,True,/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/ewc_continual_20261001_225735/checkpoints/stage3.pt

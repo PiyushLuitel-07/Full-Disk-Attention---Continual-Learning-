@@ -1,0 +1,46 @@
+{
+  "image_size": 256,
+  "batch_size": 64,
+  "num_workers": 8,
+  "epochs_per_stage": 40,
+  "learning_rate": 0.004503970181052002,
+  "weight_decay": 9.878429863141136e-05,
+  "ewc_lambda": 0.013231828906257168,
+  "early_stopping_patience": 6,
+  "early_stopping_min_delta": 0.002,
+  "scheduler_factor": 0.3,
+  "scheduler_patience": 2,
+  "min_learning_rate": 1e-06,
+  "random_seed": 42,
+  "attention": true,
+  "augmentations": [
+    "original",
+    "horizontal_flip",
+    "vertical_flip",
+    "rotation",
+    "disk_only_polarity_inversion"
+  ],
+  "fisher_data": "complete original stage training data",
+  "stages": [
+    1,
+    2,
+    3
+  ],
+  "stage_periods": {
+    "1": "2010-12 to 2017-12",
+    "2": "2018-01 to 2023-06",
+    "3": "2023-06 to 2024-06"
+  },
+  "normalization": "0_to_1_scaling",
+  "stage_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/continual_stages_2010_2024_revised_chronological",
+  "validation_csv": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/future_evaluation_labels/revised_chronological_2024_2026/validation_2024_2025.csv",
+  "image_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/downloaded_data/hmi_jpgs",
+  "device": "cuda",
+  "number_of_gpus": 2,
+  "gpus": [
+    "NVIDIA A100-SXM4-80GB",
+    "NVIDIA A100-SXM4-80GB"
+  ],
+  "multi_gpu_method": "DataParallel",
+  "pytorch_version": "2.13.0+cu130"
+}
