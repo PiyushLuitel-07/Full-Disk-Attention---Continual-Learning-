@@ -23,6 +23,7 @@ class ExperimentTracker:
         self.holdout_csv = self.directory / "holdout_metrics.csv"
         self.stage_csv = self.directory / "stage_metrics.csv"
         self.validation_csv = self.directory / "validation_metrics.csv"
+        # remember the best historical performance on every stage’s holdout.
         self.best_holdout_tss = {}
         self.best_holdout_hss = {}
         self.best_holdout_css = {}
@@ -40,21 +41,13 @@ class ExperimentTracker:
         with (self.directory / "config.json").open("w") as config_file:
             json.dump(self.config, config_file, indent=2)
 
+        # tells W&B what to use as the x-axis:
         self.run.define_metric("global_epoch")
         self.run.define_metric("training/*", step_metric="global_epoch")
-        self.run.define_metric(
-            "current_holdout/*",
-            step_metric="global_epoch",
-        )
+        self.run.define_metric("current_holdout/*", step_metric="global_epoch")
         self.run.define_metric("completed_stage")
-        self.run.define_metric(
-            "retention/*",
-            step_metric="completed_stage",
-        )
-        self.run.define_metric(
-            "forgetting/*",
-            step_metric="completed_stage",
-        )
+        self.run.define_metric("retention/*", step_metric="completed_stage")
+        self.run.define_metric("forgetting/*", step_metric="completed_stage")
 
     @staticmethod
     def _append_csv(csv_path, row):
@@ -62,21 +55,15 @@ class ExperimentTracker:
         write_header = not csv_path.exists()
 
         with csv_path.open("a", newline="") as csv_file:
-            writer = csv.DictWriter(
-                csv_file,
-                fieldnames=list(row),
-            )
-
+            writer = csv.DictWriter(csv_file, fieldnames=list(row))
             if write_header:
                 writer.writeheader()
-
             writer.writerow(row)
 
     @staticmethod
     def _history_on_cpu(ewc_history):
         """Copy Fisher values and old parameters to CPU."""
         saved_history = []
-
         for old_stage in ewc_history:
             saved_history.append(
                 {
@@ -91,7 +78,6 @@ class ExperimentTracker:
                     },
                 }
             )
-
         return saved_history
 
     def log_epoch(
@@ -109,14 +95,8 @@ class ExperimentTracker:
             "global_epoch": global_epoch,
             "training_stage": stage_number,
             "stage_epoch": stage_epoch,
-            **{
-                f"train_{name}": value
-                for name, value in train_metrics.items()
-            },
-            **{
-                f"holdout_{name}": value
-                for name, value in holdout_metrics.items()
-            },
+            **{f"train_{name}": value for name, value in train_metrics.items()},
+            **{f"holdout_{name}": value for name, value in holdout_metrics.items()},
             "learning_rate": learning_rate,
             "epoch_seconds": epoch_seconds,
         }
@@ -127,10 +107,7 @@ class ExperimentTracker:
                 "global_epoch": global_epoch,
                 "training/stage": stage_number,
                 "training/stage_epoch": stage_epoch,
-                **{
-                    f"training/{name}": value
-                    for name, value in train_metrics.items()
-                },
+                **{f"training/{name}": value for name, value in train_metrics.items()},
                 **{
                     f"current_holdout/{name}": value
                     for name, value in holdout_metrics.items()
@@ -140,49 +117,25 @@ class ExperimentTracker:
             }
         )
 
+# Runs after completing a stage.
+# It evaluates the current model on every available historical holdout.
     def log_holdouts(self, after_training_stage, holdout_results):
         """Save all historical holdout results after one stage."""
         wandb_values = {"completed_stage": after_training_stage}
 
         for evaluated_stage, metrics in holdout_results.items():
-            previous_best_tss = self.best_holdout_tss.get(
-                evaluated_stage,
-                metrics["tss"],
-            )
-            previous_best_hss = self.best_holdout_hss.get(
-                evaluated_stage,
-                metrics["hss"],
-            )
-            previous_best_css = self.best_holdout_css.get(
-                evaluated_stage,
-                metrics["css"],
-            )
+            # Forgetting is the drop from the best result seen for this holdout.
+            previous_best_tss = self.best_holdout_tss.get(evaluated_stage, metrics["tss"])
+            previous_best_hss = self.best_holdout_hss.get(evaluated_stage, metrics["hss"])
+            previous_best_css = self.best_holdout_css.get(evaluated_stage, metrics["css"])
 
-            tss_forgetting = max(
-                0.0,
-                previous_best_tss - metrics["tss"],
-            )
-            hss_forgetting = max(
-                0.0,
-                previous_best_hss - metrics["hss"],
-            )
-            css_forgetting = max(
-                0.0,
-                previous_best_css - metrics["css"],
-            )
+            tss_forgetting = max(0.0, previous_best_tss - metrics["tss"])
+            hss_forgetting = max(0.0, previous_best_hss - metrics["hss"])
+            css_forgetting = max(0.0, previous_best_css - metrics["css"])
 
-            self.best_holdout_tss[evaluated_stage] = max(
-                previous_best_tss,
-                metrics["tss"],
-            )
-            self.best_holdout_hss[evaluated_stage] = max(
-                previous_best_hss,
-                metrics["hss"],
-            )
-            self.best_holdout_css[evaluated_stage] = max(
-                previous_best_css,
-                metrics["css"],
-            )
+            self.best_holdout_tss[evaluated_stage] = max(previous_best_tss, metrics["tss"])
+            self.best_holdout_hss[evaluated_stage] = max(previous_best_hss, metrics["hss"])
+            self.best_holdout_css[evaluated_stage] = max(previous_best_css, metrics["css"])
 
             self._append_csv(
                 self.holdout_csv,
@@ -197,20 +150,13 @@ class ExperimentTracker:
             )
 
             for name, value in metrics.items():
-                wandb_values[
-                    f"retention/stage_{evaluated_stage}_{name}"
-                ] = value
+                wandb_values[f"retention/stage_{evaluated_stage}_{name}"] = value
 
-            wandb_values[
-                f"forgetting/stage_{evaluated_stage}_tss"
-            ] = tss_forgetting
-            wandb_values[
-                f"forgetting/stage_{evaluated_stage}_hss"
-            ] = hss_forgetting
-            wandb_values[
-                f"forgetting/stage_{evaluated_stage}_css"
-            ] = css_forgetting
+            wandb_values[f"forgetting/stage_{evaluated_stage}_tss"] = tss_forgetting
+            wandb_values[f"forgetting/stage_{evaluated_stage}_hss"] = hss_forgetting
+            wandb_values[f"forgetting/stage_{evaluated_stage}_css"] = css_forgetting
 
+            # Add the four confusion counts as one W&B bar chart.
             confusion_table = wandb.Table(
                 columns=["Outcome", "Count"],
                 data=[
@@ -222,18 +168,15 @@ class ExperimentTracker:
             )
             wandb_values[
                 "confusion_counts/"
-                f"after_stage_{after_training_stage}_"
-                f"on_stage_{evaluated_stage}"
+                f"after_stage_{after_training_stage}_on_stage_{evaluated_stage}"
             ] = wandb.plot.bar(
                 confusion_table,
                 "Outcome",
                 "Count",
-                title=(
-                    f"After Stage {after_training_stage}: "
-                    f"Stage {evaluated_stage} holdout"
-                ),
+                title=f"After Stage {after_training_stage}: Stage {evaluated_stage} holdout",
             )
 
+            # Keep the latest stage-level values visible in the run summary.
             for name in ("loss", "f1", "tss", "hss", "css"):
                 self.run.summary[
                     f"latest_retention/stage_{evaluated_stage}_{name}"
@@ -251,6 +194,7 @@ class ExperimentTracker:
 
         self.run.log(wandb_values)
 
+# It evaluates the final Stage 3 model on the future validation dataset:
     def log_validation(self, metrics, samples, label_csv):
         """Save final validation metrics for this complete training run."""
         self._append_csv(
@@ -263,35 +207,19 @@ class ExperimentTracker:
             },
         )
 
-        self.run.log(
-            {
-                f"validation/{name}": value
-                for name, value in metrics.items()
-            }
-        )
+        self.run.log({f"validation/{name}": value for name, value in metrics.items()})
 
         for name, value in metrics.items():
             self.run.summary[f"validation/{name}"] = value
 
     def save_best_stage_model(
-        self,
-        model,
-        optimizer,
-        stage_number,
-        stage_epoch,
-        holdout_css,
+        self, model, optimizer, stage_number, stage_epoch, holdout_css
     ):
         """Save the best model observed within one training stage."""
-        checkpoint_path = (
-            self.checkpoint_directory
-            / f"stage{stage_number}_best.pt"
-        )
-        model_to_save = (
-            model.module
-            if isinstance(model, torch.nn.DataParallel)
-            else model
-        )
+        checkpoint_path = self.checkpoint_directory / f"stage{stage_number}_best.pt"
+        model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
 
+        # Save everything required to resume from the best epoch.
         torch.save(
             {
                 "stage": stage_number,
@@ -306,29 +234,27 @@ class ExperimentTracker:
 
         return checkpoint_path
 
+# This is done after training or early stopping so that the system continues using the best weights,
+#  rather than the weights from the last epoch.
     @staticmethod
-    def restore_best_stage_model(
-        checkpoint_path,
-        model,
-        optimizer,
-        device,
-    ):
+    def restore_best_stage_model(checkpoint_path, model, optimizer, device):
         """Restore the model and optimizer from a best-stage checkpoint."""
-        checkpoint = torch.load(
-            checkpoint_path,
-            map_location=device,
-            weights_only=False,
-        )
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model_to_restore = (
-            model.module
-            if isinstance(model, torch.nn.DataParallel)
-            else model
+            model.module if isinstance(model, torch.nn.DataParallel) else model
         )
         model_to_restore.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         return checkpoint
 
+    '''
+    Saves the final state of a completed continual-learning stage.
+    Examples:
+    checkpoints/stage1.pt
+    checkpoints/stage2.pt
+    checkpoints/stage3.pt 
+    '''
     def save_stage(
         self,
         model,
@@ -343,16 +269,10 @@ class ExperimentTracker:
         stopped_early,
     ):
         """Save one stage checkpoint and its stage-level information."""
-        checkpoint_path = (
-            self.checkpoint_directory
-            / f"stage{stage_number}.pt"
-        )
-        model_to_save = (
-            model.module
-            if isinstance(model, torch.nn.DataParallel)
-            else model
-        )
+        checkpoint_path = self.checkpoint_directory / f"stage{stage_number}.pt"
+        model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
 
+        # Final stage checkpoints also contain the accumulated EWC history.
         torch.save(
             {
                 "completed_stage": stage_number,

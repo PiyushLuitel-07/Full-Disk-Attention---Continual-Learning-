@@ -10,43 +10,28 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from attention_model import Attn_Net
-from dataloader import (
-    build_evaluation_loader,
-    build_stage_loaders,
-    discover_stages,
-)
+from dataloader import build_evaluation_loader, build_stage_loaders, discover_stages
 from evaluation import calculate_classification_metrics, evaluate
 from ewc import calculate_fisher, ewc_penalty, save_parameters
 from experiment_tracker import ExperimentTracker
 
 
-# ---------------------------------------------------------------------
-# 1. CONFIGURATION
-# ---------------------------------------------------------------------
-
+# Defaults below are replaced by matching wandb.config values during a sweep.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STAGE_DIRECTORY = (
     PROJECT_ROOT
-    / "data_labeling"
-    / "data_labels"
-    / "continual_stages_2010_2024_revised_chronological"
+    / "data_labeling/data_labels/continual_stages_2010_2024_revised_chronological"
 )
-IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data" / "hmi_jpgs"
+IMAGE_DIRECTORY = PROJECT_ROOT / "downloaded_data/hmi_jpgs"
 RESULTS_DIRECTORY = PROJECT_ROOT / "results"
 VALIDATION_CSV = (
     PROJECT_ROOT
-    / "data_labeling"
-    / "data_labels"
-    / "future_evaluation_labels"
-    / "revised_chronological_2024_2026"
-    / "validation_2024_2025.csv"
+    / "data_labeling/data_labels/future_evaluation_labels"
+    / "revised_chronological_2024_2026/validation_2024_2025.csv"
 )
 
 WANDB_ENTITY = "piyush-luitel-texas-christian-university"
-WANDB_PROJECT = (
-    "Full disk attention solar flare prediction "
-    "with continual learning"
-)
+WANDB_PROJECT = "Full disk attention solar flare prediction with continual learning"
 
 IMAGE_SIZE = 256
 BATCH_SIZE = 128
@@ -63,115 +48,76 @@ MIN_LEARNING_RATE = 0.000001
 RANDOM_SEED = 42
 
 
-# ---------------------------------------------------------------------
-# 2. TRAIN ONE EPOCH
-# ---------------------------------------------------------------------
-
+# Train one epoch: classification learns the current stage while EWC protects
+# parameters important to previous stages. Stage 1 has no EWC history yet.
 def train_one_epoch(
-    model,
-    data_loader,
-    criterion,
-    optimizer,
-    device,
-    ewc_history,
-    ewc_lambda,
+    model, data_loader, criterion, optimizer, device, ewc_history, ewc_lambda
 ):
     model.train()
-
-    loss_sums = {
-        "loss": 0.0,
-        "classification_loss": 0.0,
-        "ewc_loss": 0.0,
-    }
-    predictions = []
-    targets = []
-    number_of_images = 0
+    loss_sums = {"loss": 0.0, "classification_loss": 0.0, "ewc_loss": 0.0}
+    predictions, targets, number_of_images = [], [], 0
 
     for images, batch_targets in data_loader:
         images = images.to(device, non_blocking=True)
         batch_targets = batch_targets.to(device, non_blocking=True)
-
         optimizer.zero_grad(set_to_none=True)
 
         scores = model(images)[0]
         classification_loss = criterion(scores, batch_targets)
-        ewc_loss = (
-            ewc_lambda / 2.0
-        ) * ewc_penalty(model, ewc_history)
+        ewc_loss = (ewc_lambda / 2.0) * ewc_penalty(model, ewc_history)
         loss = classification_loss + ewc_loss
-
         loss.backward()
         optimizer.step()
 
         batch_size = images.size(0)
         loss_sums["loss"] += loss.item() * batch_size
-        loss_sums["classification_loss"] += (
-            classification_loss.item() * batch_size
-        )
+        loss_sums["classification_loss"] += classification_loss.item() * batch_size
         loss_sums["ewc_loss"] += ewc_loss.item() * batch_size
         number_of_images += batch_size
-
         predictions.extend(scores.argmax(dim=1).detach().cpu().tolist())
         targets.extend(batch_targets.detach().cpu().tolist())
 
     metrics = calculate_classification_metrics(predictions, targets)
-
-    for name, value in loss_sums.items():
-        metrics[name] = value / number_of_images
-
+    metrics.update(
+        {name: value / number_of_images for name, value in loss_sums.items()}
+    )
     return metrics
 
 
-def evaluate_learned_stages(
-    model,
-    holdout_loaders,
-    criterion,
-    device,
-):
-    """Evaluate every holdout encountered so far."""
+# Evaluate every holdout seen so far to measure retention and forgetting.
+def evaluate_learned_stages(model, holdout_loaders, criterion, device):
     print("\nHistorical holdout evaluation")
     results = {}
 
     for stage_number, holdout_loader in holdout_loaders.items():
         metrics = evaluate(model, holdout_loader, criterion, device)
         results[stage_number] = metrics
-
         print(
             f"Stage {stage_number} holdout | "
             f"accuracy={metrics['accuracy']:.4f} | "
             f"precision={metrics['precision']:.4f} | "
-            f"recall={metrics['recall']:.4f} | "
-            f"F1={metrics['f1']:.4f} | "
-            f"TSS={metrics['tss']:.4f} | "
-            f"HSS={metrics['hss']:.4f} | "
+            f"recall={metrics['recall']:.4f} | F1={metrics['f1']:.4f} | "
+            f"TSS={metrics['tss']:.4f} | HSS={metrics['hss']:.4f} | "
             f"CSS={metrics['css']:.4f}"
         )
 
     return results
 
 
-# ---------------------------------------------------------------------
-# 4. COMPLETE CONTINUAL-LEARNING PIPELINE
-# ---------------------------------------------------------------------
-
 def main():
+    # Reproducibility and hardware discovery.
     random.seed(RANDOM_SEED)
     torch.manual_seed(RANDOM_SEED)
-
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(RANDOM_SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    number_of_gpus = torch.cuda.device_count()
     gpu_names = (
-        [
-            torch.cuda.get_device_name(index)
-            for index in range(torch.cuda.device_count())
-        ]
+        [torch.cuda.get_device_name(i) for i in range(number_of_gpus)]
         if torch.cuda.is_available()
         else ["CPU"]
     )
-    number_of_gpus = torch.cuda.device_count()
-
     stages = discover_stages(STAGE_DIRECTORY)
     stage_numbers = [stage["number"] for stage in stages]
 
@@ -181,6 +127,7 @@ def main():
         print(f"  GPU {index}: {gpu_name}")
     print(f"Stages discovered: {stage_numbers}")
 
+    # Record the complete experiment; sweep values later override matching keys.
     config = {
         "image_size": IMAGE_SIZE,
         "batch_size": BATCH_SIZE,
@@ -217,57 +164,51 @@ def main():
         "device": str(device),
         "number_of_gpus": number_of_gpus,
         "gpus": gpu_names,
-        "multi_gpu_method": (
-            "DataParallel" if number_of_gpus > 1 else "single_device"
-        ),
+        "multi_gpu_method": "DataParallel" if number_of_gpus > 1 else "single_device",
         "pytorch_version": torch.__version__,
     }
 
+    # One tracker/W&B run represents one complete three-stage experiment.
     with ExperimentTracker(
         config=config,
         results_directory=RESULTS_DIRECTORY,
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
     ) as tracker:
+        # Effective values include parameters supplied by a W&B sweep.
         batch_size = int(tracker.config["batch_size"])
         epochs_per_stage = int(tracker.config["epochs_per_stage"])
         learning_rate = float(tracker.config["learning_rate"])
         weight_decay = float(tracker.config["weight_decay"])
         ewc_lambda = float(tracker.config["ewc_lambda"])
-        early_stopping_patience = int(
-            tracker.config["early_stopping_patience"]
-        )
+        early_stopping_patience = int(tracker.config["early_stopping_patience"])
         early_stopping_min_delta = float(
             tracker.config["early_stopping_min_delta"]
         )
         scheduler_factor = float(tracker.config["scheduler_factor"])
         scheduler_patience = int(tracker.config["scheduler_patience"])
-        min_learning_rate = float(
-            tracker.config["min_learning_rate"]
-        )
+        min_learning_rate = float(tracker.config["min_learning_rate"])
 
+        # The same model continues through all stages.
         model = Attn_Net(
             im_size=IMAGE_SIZE,
             num_classes=2,
             attention=True,
             init="kaimingUniform",
         ).to(device)
-
         if number_of_gpus > 1:
             model = nn.DataParallel(model)
             print(f"Using DataParallel on {number_of_gpus} GPUs")
 
         criterion = nn.CrossEntropyLoss()
-        ewc_history = []
-        holdout_loaders = {}
-        global_epoch = 0
+        ewc_history, holdout_loaders, global_epoch = [], {}, 0
 
+        # Train Stage 1 -> Stage 2 -> Stage 3 without reinitializing the model.
         for stage in stages:
             stage_number = stage["number"]
-            print(f"\n{'=' * 60}")
-            print(f"Training Stage {stage_number}")
-            print(f"{'=' * 60}")
+            print(f"\n{'=' * 60}\nTraining Stage {stage_number}\n{'=' * 60}")
 
+            # Balanced training, natural holdout and original Fisher loaders.
             loaders = build_stage_loaders(
                 train_csv=stage["train_file"],
                 holdout_csv=stage["holdout_file"],
@@ -279,10 +220,9 @@ def main():
             )
             holdout_loaders[stage_number] = loaders["holdout"]
 
+            # Optimizer and scheduler restart at the beginning of every stage.
             optimizer = SGD(
-                model.parameters(),
-                lr=learning_rate,
-                weight_decay=weight_decay,
+                model.parameters(), lr=learning_rate, weight_decay=weight_decay
             )
             scheduler = ReduceLROnPlateau(
                 optimizer,
@@ -293,9 +233,10 @@ def main():
                 threshold_mode="abs",
                 min_lr=min_learning_rate,
             )
+
+            # Reset per-stage checkpoint and early-stopping state.
             best_holdout_css = float("-inf")
-            best_stage_epoch = None
-            best_checkpoint = None
+            best_stage_epoch = best_checkpoint = None
             epochs_without_improvement = 0
             stopped_early = False
             stopping_epoch = epochs_per_stage
@@ -303,7 +244,6 @@ def main():
             for stage_epoch in range(1, epochs_per_stage + 1):
                 global_epoch += 1
                 epoch_start = time.perf_counter()
-
                 train_metrics = train_one_epoch(
                     model,
                     loaders["train"],
@@ -314,13 +254,9 @@ def main():
                     ewc_lambda,
                 )
                 holdout_metrics = evaluate(
-                    model,
-                    loaders["holdout"],
-                    criterion,
-                    device,
+                    model, loaders["holdout"], criterion, device
                 )
                 epoch_seconds = time.perf_counter() - epoch_start
-
                 tracker.log_epoch(
                     global_epoch,
                     stage_number,
@@ -331,10 +267,8 @@ def main():
                     epoch_seconds,
                 )
 
-                if (
-                    holdout_metrics["css"]
-                    > best_holdout_css + early_stopping_min_delta
-                ):
+                # Save only meaningful CSS improvements.
+                if holdout_metrics["css"] > best_holdout_css + early_stopping_min_delta:
                     best_holdout_css = holdout_metrics["css"]
                     best_stage_epoch = stage_epoch
                     epochs_without_improvement = 0
@@ -348,15 +282,17 @@ def main():
                 else:
                     epochs_without_improvement += 1
 
+                # Reduce the learning rate before early stopping gives up.
+                # After each holdout evaluation:
                 learning_rate_before_step = optimizer.param_groups[0]["lr"]
+                # reduced the learning rate after evaluating holdout CSS.
                 scheduler.step(holdout_metrics["css"])
                 learning_rate_after_step = optimizer.param_groups[0]["lr"]
-
+                # This checks whether the scheduler reduced the learning rate after evaluating holdout CSS.
                 if learning_rate_after_step < learning_rate_before_step:
                     print(
-                        "Reduced learning rate from "
-                        f"{learning_rate_before_step:.6g} to "
-                        f"{learning_rate_after_step:.6g}"
+                        f"Reduced learning rate from {learning_rate_before_step:.6g} "
+                        f"to {learning_rate_after_step:.6g}"
                     )
 
                 print(
@@ -369,45 +305,36 @@ def main():
                     f"time={epoch_seconds:.1f}s"
                 )
 
-                if (
-                    epochs_without_improvement
-                    >= early_stopping_patience
-                ):
-                    stopped_early = True
-                    stopping_epoch = stage_epoch
+                if epochs_without_improvement >= early_stopping_patience:
+                    stopped_early, stopping_epoch = True, stage_epoch
                     print(
-                        f"Early stopping Stage {stage_number} at epoch "
-                        f"{stage_epoch}: holdout CSS did not improve by "
-                        f"at least {early_stopping_min_delta:.4f} for "
+                        f"Early stopping Stage {stage_number} at epoch {stage_epoch}: "
+                        f"holdout CSS did not improve by at least "
+                        f"{early_stopping_min_delta:.4f} for "
                         f"{early_stopping_patience} epochs."
                     )
                     break
 
+            # Fisher and the next stage must use the best, not last, epoch.
             restored_checkpoint = tracker.restore_best_stage_model(
-                best_checkpoint,
-                model,
-                optimizer,
-                device,
+                best_checkpoint, model, optimizer, device
             )
             print(
-                f"Restored Stage {stage_number} best checkpoint from "
-                f"epoch {restored_checkpoint['stage_epoch']} "
+                f"Restored Stage {stage_number} best checkpoint from epoch "
+                f"{restored_checkpoint['stage_epoch']} "
                 f"(holdout CSS={restored_checkpoint['holdout_css']:.4f})"
             )
 
             holdout_results = evaluate_learned_stages(
-                model,
-                holdout_loaders,
-                criterion,
-                device,
+                model, holdout_loaders, criterion, device
             )
             tracker.log_holdouts(stage_number, holdout_results)
 
+            # Estimate restored parameter importance for later EWC penalties.
             print(f"\nCalculating Stage {stage_number} Fisher information...")
             fisher_start = time.perf_counter()
             fisher = calculate_fisher(model, loaders["fisher"], device)
             fisher_seconds = time.perf_counter() - fisher_start
-
             ewc_history.append(
                 {
                     "stage": stage_number,
@@ -416,6 +343,7 @@ def main():
                 }
             )
 
+            # stageN.pt stores the best model plus accumulated EWC history.
             checkpoint = tracker.save_stage(
                 model,
                 optimizer,
@@ -430,6 +358,7 @@ def main():
             )
             print(f"Stage {stage_number} completed: {checkpoint}")
 
+        # Evaluate the completed Stage-3 model once for sweep model selection.
         print("\nEvaluating final model on 2024-2025 validation data...")
         validation_loader = build_evaluation_loader(
             csv_file=VALIDATION_CSV,
@@ -439,25 +368,16 @@ def main():
             num_workers=NUM_WORKERS,
             pin_memory=device.type == "cuda",
         )
-        validation_metrics = evaluate(
-            model,
-            validation_loader,
-            criterion,
-            device,
-        )
+        validation_metrics = evaluate(model, validation_loader, criterion, device)
         tracker.log_validation(
-            validation_metrics,
-            len(validation_loader.dataset),
-            VALIDATION_CSV,
+            validation_metrics, len(validation_loader.dataset), VALIDATION_CSV
         )
         print(
-            "Validation | "
-            f"CSS={validation_metrics['css']:.4f} | "
+            f"Validation | CSS={validation_metrics['css']:.4f} | "
             f"TSS={validation_metrics['tss']:.4f} | "
             f"HSS={validation_metrics['hss']:.4f} | "
             f"loss={validation_metrics['loss']:.4f}"
         )
-
         print("\nAll continual-learning stages completed.")
         print(f"Local results: {tracker.directory}")
 
