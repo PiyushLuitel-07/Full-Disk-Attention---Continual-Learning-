@@ -357,9 +357,9 @@ class ControlledFlareDataset(Dataset):
     """
     Produce a balanced number of FL samples using controlled views.
 
-    Every FL sample is selected cyclically. Its augmentation changes
-    predictably across repetitions so that original, horizontal flip,
-    vertical flip, rotation, and polarity views are all represented.
+    Every original FL image is included once without augmentation.
+    Only the additional samples required for class balancing use
+    horizontal flip, vertical flip, rotation, or polarity inversion.
     """
 
     def __init__(self, flare_views, length):
@@ -380,15 +380,18 @@ class ControlledFlareDataset(Dataset):
         return self.length
 
     def __getitem__(self, index):
-        sample_index = index % self.original_flare_count
-        repetition_number = index // self.original_flare_count
+        # First include every FL image once in its original form.
+        if index < self.original_flare_count:
+            return self.flare_views[0][index]
 
-        # Shift the augmentation used for an image each time the FL
-        # dataset repeats. This distributes all augmentation types
-        # predictably without choosing one randomly.
-        view_index = (
+        # Use only augmented views for the additional balancing samples.
+        extra_index = index - self.original_flare_count
+        sample_index = extra_index % self.original_flare_count
+        repetition_number = extra_index // self.original_flare_count
+        number_of_augmentations = self.number_of_views - 1
+        view_index = 1 + (
             sample_index + repetition_number
-        ) % self.number_of_views
+        ) % number_of_augmentations
 
         return self.flare_views[view_index][sample_index]
 
