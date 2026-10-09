@@ -39,82 +39,7 @@ class BasicTransform:
 
 
 # ---------------------------------------------------------------------
-# 2. DISK-ONLY POLARITY INVERSION
-# ---------------------------------------------------------------------
-
-class DiskPolarityInversion:
-    """
-    Reverse magnetic polarity only inside the solar disk.
-
-    The black background outside the Sun remains unchanged.
-    """
-
-    def __init__(
-        self,
-        center_x_ratio=0.50,
-        center_y_ratio=0.50,
-        radius_ratio=0.40,
-    ):
-        self.center_x_ratio = center_x_ratio
-        self.center_y_ratio = center_y_ratio
-        self.radius_ratio = radius_ratio
-
-    def __call__(self, image):
-        """
-        Parameters
-        ----------
-        image:
-            Tensor with shape [channels, height, width].
-            Pixel values must be between 0 and 1.
-        """
-
-        if image.ndim != 3:
-            raise ValueError(
-                "Polarity inversion expects a tensor with shape "
-                "[channels, height, width]."
-            )
-
-        _, height, width = image.shape
-
-        center_x = self.center_x_ratio * (width - 1)
-        center_y = self.center_y_ratio * (height - 1)
-
-        radius = self.radius_ratio * min(
-            height,
-            width,
-        )
-
-        y_coordinates, x_coordinates = torch.meshgrid(
-            torch.arange(
-                height,
-                device=image.device,
-            ),
-            torch.arange(
-                width,
-                device=image.device,
-            ),
-            indexing="ij",
-        )
-
-        disk_mask = (
-            (x_coordinates - center_x) ** 2
-            + (y_coordinates - center_y) ** 2
-            <= radius ** 2
-        )
-
-        polarity_image = image.clone()
-
-        # Reverse polarity only inside the solar disk.
-        polarity_image[:, disk_mask] = (
-            1.0 - polarity_image[:, disk_mask]
-        )
-
-        # Pixels outside the mask remain unchanged.
-        return polarity_image
-
-
-# ---------------------------------------------------------------------
-# 3. FLARE-IMAGE TRAINING TRANSFORMATION
+# 2. FLARE-IMAGE TRAINING TRANSFORMATION
 # ---------------------------------------------------------------------
 
 class FlareTrainingTransform:
@@ -125,8 +50,8 @@ class FlareTrainingTransform:
         1. Original image
         2. Horizontal flip
         3. Vertical flip
-        4. Small rotation
-        5. Disk-only polarity inversion
+        4. Exact 180-degree rotation
+        5. Small random rotation
 
     This transformation is not used for holdout or Fisher data.
     """
@@ -141,8 +66,8 @@ class FlareTrainingTransform:
             "original",
             "horizontal_flip",
             "vertical_flip",
-            "rotation",
-            "polarity",
+            "rotation_180",
+            "small_rotation",
         }
 
         if augmentation not in available_augmentations:
@@ -153,12 +78,6 @@ class FlareTrainingTransform:
         self.augmentation = augmentation
         self.image_size = image_size
         self.rotation_degrees = rotation_degrees
-
-        self.polarity_inversion = DiskPolarityInversion(
-            center_x_ratio=0.50,
-            center_y_ratio=0.50,
-            radius_ratio=0.40,
-        )
 
     def __call__(self, image):
         image = TF.resize(
@@ -172,7 +91,12 @@ class FlareTrainingTransform:
         elif self.augmentation == "vertical_flip":
             image = TF.vflip(image)
 
-        elif self.augmentation == "rotation":
+        elif self.augmentation == "rotation_180":
+            image = TF.vflip(
+                TF.hflip(image)
+            )
+
+        elif self.augmentation == "small_rotation":
             angle = random.uniform(
                 -self.rotation_degrees,
                 self.rotation_degrees,
@@ -185,9 +109,6 @@ class FlareTrainingTransform:
 
         # Convert the PIL image to a tensor with values from 0 to 1.
         image = TF.to_tensor(image)
-
-        if self.augmentation == "polarity":
-            image = self.polarity_inversion(image)
 
         return image
 
@@ -359,7 +280,8 @@ class ControlledFlareDataset(Dataset):
 
     Every original FL image is included once without augmentation.
     Only the additional samples required for class balancing use
-    horizontal flip, vertical flip, rotation, or polarity inversion.
+    horizontal flip, vertical flip, exact 180-degree rotation, or
+    small random rotation.
     """
 
     def __init__(self, flare_views, length):
@@ -519,8 +441,8 @@ def build_stage_loaders(
         "original",
         "horizontal_flip",
         "vertical_flip",
-        "rotation",
-        "polarity",
+        "rotation_180",
+        "small_rotation",
     ]
 
     flare_views = []
