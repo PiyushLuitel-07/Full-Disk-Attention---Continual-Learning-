@@ -1,0 +1,24 @@
+name: stage2_lambda_bayesian_tuning
+program: modeling/stage2_01_train.py
+method: bayes
+
+# The Bayesian optimizer explores future generalization. Stage 1 retention,
+# forgetting, and retention ratio are logged by every trial for the final
+# validation-versus-retention review.
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  # EWC coefficients are scale-dependent, so search several orders of
+  # magnitude logarithmically. Zero is intentionally excluded because every
+  # Stage 2 trial is an EWC trial.
+  ewc_lambda:
+    distribution: log_uniform_values
+    min: 0.1
+    max: 1000.0
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
