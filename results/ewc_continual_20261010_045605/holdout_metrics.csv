@@ -1,0 +1,2 @@
+after_training_stage,evaluated_stage,accuracy,precision,recall,f1,tss,hss,css,tp,tn,fp,fn,loss,tss_forgetting,hss_forgetting,css_forgetting
+1,1,0.9526123936816525,0.4342105263157895,0.6,0.5038167938931297,0.5673417721518987,0.47960543595630223,0.5216322439891273,198,7642,258,132,0.2203440929585355,0.0,0.0,0.0
