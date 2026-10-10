@@ -1,0 +1,49 @@
+name: stage1_bayesian_tuning
+program: modeling/stage1_train.py
+method: bayes
+
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.01
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.00000001
+    max: 0.001
+
+  batch_size:
+    values:
+      - 24
+      - 32
+      - 64
+      - 128
+      - 256
+
+  epochs_per_stage:
+    value: 100
+
+  early_stopping_patience:
+    value: 12
+
+  early_stopping_min_delta:
+    value: 0.001
+
+  scheduler_factor:
+    value: 0.3
+
+  scheduler_patience:
+    value: 3
+
+  min_learning_rate:
+    value: 0.0000001
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
