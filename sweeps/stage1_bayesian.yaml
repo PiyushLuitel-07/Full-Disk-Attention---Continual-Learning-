@@ -1,5 +1,5 @@
 name: stage1_bayesian_tuning
-program: modeling/stage1_train.py
+program: modeling/stage1_01_train.py
 method: bayes
 
 metric:
