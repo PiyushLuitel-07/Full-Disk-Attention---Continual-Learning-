@@ -3,6 +3,19 @@
 import torch
 
 
+def calculate_css(tss, hss):
+    """Return CSS only when both component skill scores are positive.
+
+    CSS is the geometric mean of TSS and HSS. A model with a nonpositive
+    value for either component has no positive combined skill, so its CSS is
+    defined as zero. Clamping the components separately also prevents two
+    negative skill scores from multiplying into a misleading positive CSS.
+    """
+    positive_tss = max(0.0, float(tss))
+    positive_hss = max(0.0, float(hss))
+    return (positive_tss * positive_hss) ** 0.5
+
+
 def calculate_classification_metrics(predictions, targets):
     """Return all binary FL/NF metrics in one dictionary."""
     if len(predictions) != len(targets):
@@ -57,8 +70,7 @@ def calculate_classification_metrics(predictions, targets):
         if hss_denominator
         else 0.0
     )
-    skill_product = tss * hss
-    css = skill_product ** 0.5 if skill_product >= 0 else 0.0
+    css = calculate_css(tss, hss)
 
     return {
         "accuracy": float(accuracy),
