@@ -14,7 +14,7 @@ never modified.
 Example
 -------
 python modeling/stage2_02_calculate_fisher.py \
-    --checkpoint results/<winning_run>/checkpoints/stage2.pt
+    --checkpoint results/ewc_continual_20261010_130641/checkpoints/stage2.pt
 """
 
 import argparse

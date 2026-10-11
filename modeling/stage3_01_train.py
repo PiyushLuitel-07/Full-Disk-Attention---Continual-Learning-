@@ -12,10 +12,6 @@ parameters from both earlier stages are protected. Stage 3 holdout CSS controls
 learning-rate scheduling, early stopping, and best-epoch restoration. After
 restoration, the script evaluates Stage 1 and Stage 2 retention and the common
 future validation set.
-
-The test set is deliberately excluded. The final restored ``stage3.pt`` model
-must be evaluated on the test set only once, in a separate command, after this
-training run finishes.
 """
 
 import random

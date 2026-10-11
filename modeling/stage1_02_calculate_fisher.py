@@ -16,7 +16,7 @@ does not modify the selected checkpoint. Instead, it writes a separate
 Example
 -------
 python modeling/stage1_02_calculate_fisher.py \
-    --checkpoint results/<winning_run>/checkpoints/stage1.pt
+    --checkpoint results/ewc_continual_20261010_043758/checkpoints/stage1.pt
 """
 
 import argparse
