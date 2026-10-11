@@ -52,6 +52,15 @@ def parse_arguments():
         default=10,
         help="Maximum number of Stage 3 training batches to simulate.",
     )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help=(
+            "Optional diagnostic-only learning rate. By default, use the "
+            "learning rate stored in the selected Stage 2 checkpoint."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -166,7 +175,14 @@ def main():
 
     image_size = int(config["image_size"])
     batch_size = int(config["batch_size"])
-    learning_rate = float(config["learning_rate"])
+    checkpoint_learning_rate = float(config["learning_rate"])
+    learning_rate = float(
+        args.learning_rate
+        if args.learning_rate is not None
+        else checkpoint_learning_rate
+    )
+    if learning_rate <= 0:
+        raise ValueError("--learning-rate must be greater than zero.")
     weight_decay = float(config["weight_decay"])
     ewc_lambda = float(config["ewc_lambda"])
     random_seed = int(config["random_seed"])
@@ -202,7 +218,12 @@ def main():
 
     print(f"Checkpoint: {STAGE2_EWC_CHECKPOINT}")
     print(f"Device: {device}")
+    print(f"Checkpoint learning rate: {checkpoint_learning_rate:.10g}")
     print(f"Learning rate: {learning_rate:.10g}")
+    print(
+        "Diagnostic learning-rate override: "
+        f"{args.learning_rate is not None}"
+    )
     print(f"EWC lambda: {ewc_lambda:.10g}")
     print(f"Combined Fisher maximum: {combined_max:.10g}")
     print(f"Combined Fisher maximum parameter: {maximum_name}")
