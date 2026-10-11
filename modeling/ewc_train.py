@@ -66,8 +66,40 @@ def train_one_epoch(
         classification_loss = criterion(scores, batch_targets)
         ewc_loss = (ewc_lambda / 2.0) * ewc_penalty(model, ewc_history)
         loss = classification_loss + ewc_loss
+
+        # Numerical failures must stop the run before a corrupted checkpoint
+        # can be produced. These checks do not change any finite computation.
+        if not torch.isfinite(classification_loss):
+            raise FloatingPointError(
+                "Classification loss became non-finite before backward()."
+            )
+        if not torch.isfinite(ewc_loss):
+            raise FloatingPointError(
+                "EWC loss became non-finite before backward()."
+            )
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "Total training loss became non-finite before backward()."
+            )
+
         loss.backward()
+
+        for name, parameter in model.named_parameters():
+            if parameter.grad is not None and not torch.isfinite(
+                parameter.grad
+            ).all():
+                raise FloatingPointError(
+                    f"Gradient became non-finite for parameter {name!r}."
+                )
+
         optimizer.step()
+
+        for name, parameter in model.named_parameters():
+            if not torch.isfinite(parameter).all():
+                raise FloatingPointError(
+                    "Optimizer produced a non-finite value for parameter "
+                    f"{name!r}."
+                )
 
         batch_size = images.size(0)
         loss_sums["loss"] += loss.item() * batch_size

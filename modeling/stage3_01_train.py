@@ -2,8 +2,9 @@
 
 Stage 3 starts from the single Stage 2 model selected using validation CSS and
 reviewed for Stage 1 retention. Its Stage 1 training hyperparameters and the
-EWC lambda selected during Stage 2 are fixed; Stage 3 performs no additional
-hyperparameter sweep.
+EWC lambda selected during Stage 2 are fixed, except for one documented
+numerical-stability adjustment to the Stage 3 initial learning rate. Stage 3
+performs no additional hyperparameter sweep.
 
 The source checkpoint contains two EWC-history entries: one for Stage 1 and
 one for Stage 2. Stage 3 training applies both entries so that important
@@ -132,7 +133,7 @@ def main():
     # Stage 3 introduces no new tuning dimension.
     image_size = int(fixed_config["image_size"])
     batch_size = int(fixed_config["batch_size"])
-    learning_rate = float(fixed_config["learning_rate"])
+    source_learning_rate = float(fixed_config["learning_rate"])
     weight_decay = float(fixed_config["weight_decay"])
     ewc_lambda = float(fixed_config["ewc_lambda"])
     epochs_per_stage = int(fixed_config["epochs_per_stage"])
@@ -144,6 +145,14 @@ def main():
     scheduler_patience = int(fixed_config["scheduler_patience"])
     min_learning_rate = float(fixed_config["min_learning_rate"])
     random_seed = int(fixed_config["random_seed"])
+
+    # Applying the selected lambda to both accumulated Fisher entries made the
+    # inherited learning rate numerically unstable. A full-epoch diagnostic
+    # measured lr * lambda * max(F1 + F2) = 3.4406 and reproduced EWC overflow.
+    # Starting Stage 3 at the already defined first scheduler-reduced rate
+    # lowered that quantity to 1.0322 and kept all 133 diagnostic batches
+    # finite. This is a stability correction, not a validation-based search.
+    learning_rate = source_learning_rate * scheduler_factor
 
     random.seed(random_seed)
     torch.manual_seed(random_seed)
@@ -169,7 +178,8 @@ def main():
     print("Training mode: Stage 3 only")
     print(f"Fixed Stage 2 checkpoint: {STAGE2_EWC_CHECKPOINT}")
     print(f"Fixed batch size: {batch_size}")
-    print(f"Fixed learning rate: {learning_rate:.8g}")
+    print(f"Source learning rate: {source_learning_rate:.8g}")
+    print(f"Stage 3 stability-adjusted learning rate: {learning_rate:.8g}")
     print(f"Fixed weight decay: {weight_decay:.8g}")
     print(f"Fixed EWC lambda: {ewc_lambda:.8g}")
     print("Protected EWC stages: [1, 2]")
@@ -182,6 +192,12 @@ def main():
         "num_workers": NUM_WORKERS,
         "epochs_per_stage": epochs_per_stage,
         "learning_rate": learning_rate,
+        "source_learning_rate": source_learning_rate,
+        "learning_rate_adjustment": "source_learning_rate_x_scheduler_factor",
+        "learning_rate_adjustment_reason": (
+            "two-history EWC stability diagnostic; original stability "
+            "quantity 3.4406, adjusted quantity 1.0322"
+        ),
         "weight_decay": weight_decay,
         "ewc_lambda": ewc_lambda,
         "early_stopping_patience": early_stopping_patience,
