@@ -1,0 +1,58 @@
+{
+  "training_mode": "stage2_lambda_tuning",
+  "source_stage1_checkpoint": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/ewc_continual_20261010_043758/checkpoints/stage1_ewc_ready.pt",
+  "image_size": 256,
+  "batch_size": 64,
+  "num_workers": 8,
+  "epochs_per_stage": 100,
+  "learning_rate": 0.001432677010611599,
+  "weight_decay": 2.761575178805963e-05,
+  "ewc_lambda": 1.8959266907159824,
+  "early_stopping_patience": 12,
+  "early_stopping_min_delta": 0.001,
+  "scheduler_factor": 0.3,
+  "scheduler_patience": 3,
+  "min_learning_rate": 1e-07,
+  "random_seed": 42,
+  "attention": true,
+  "augmentations": [
+    "original",
+    "horizontal_flip",
+    "vertical_flip",
+    "rotation_180",
+    "small_rotation"
+  ],
+  "fisher_data": "fixed Stage 1 Fisher from complete original training data",
+  "stages": [
+    2
+  ],
+  "stage_periods": {
+    "2": "2018-01 to 2023-06"
+  },
+  "normalization": "0_to_1_scaling",
+  "stage_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/continual_stages_2010_2024_revised_chronological",
+  "validation_csv": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/future_evaluation_labels/revised_chronological_2024_2026/validation_2024_2025.csv",
+  "image_directory": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/downloaded_data/hmi_jpgs",
+  "device": "cuda",
+  "number_of_gpus": 2,
+  "gpus": [
+    "NVIDIA A100-SXM4-80GB",
+    "NVIDIA A100-SXM4-80GB"
+  ],
+  "multi_gpu_method": "DataParallel",
+  "pytorch_version": "2.13.0+cu130",
+  "stage1_fisher_metadata": {
+    "augmentation": "none",
+    "class_balancing": "none",
+    "num_workers": 8,
+    "source_checkpoint": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/ewc_continual_20261010_043758/checkpoints/stage1.pt",
+    "training_csv": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/continual_stages_2010_2024_revised_chronological/Stage1_train.csv",
+    "samples": 46638,
+    "fisher_sum": 1260.7526026703429,
+    "shuffle": false,
+    "batch_size": 64,
+    "fisher_max": 7.135532379150391,
+    "prepared_at": "2026-10-10T12:42:33",
+    "seconds": 34.61354929022491
+  }
+}
