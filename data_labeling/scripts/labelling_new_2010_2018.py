@@ -13,13 +13,14 @@ OUTPUT_FILE = ROOT / "data_labeling" / "data_labels" / "labels_2010_2018.csv"
 START = datetime(2010, 12, 1)
 END = datetime(2018, 12, 30, 23)
 
-
+# Extracting an image timestamp
 def image_time(path):
     return datetime.strptime(path.name, "HMI.m%Y.%m.%d_%H.%M.%S.jpg")
 
-
+# Converts a GOES class into a sortable value.
 def flare_strength(goes_class):
     rank = {"A": 0, "B": 1, "C": 2, "M": 3, "X": 4}
+    # Return the flare category rank and numeric magnitude for strength-based sorting.
     return rank[goes_class[0]], float(goes_class[1:])
 
 
@@ -34,12 +35,14 @@ def main():
     with GOES_FILE.open(newline="", encoding="utf-8-sig") as file:
         events = list(csv.DictReader(file))
 
+# Converts each flare’s start_time from text into a Python datetime.
     for event in events:
         event["time"] = datetime.strptime(
             event["start_time"], "%Y-%m-%d %H:%M:%S"
         )
-
+# The events are then sorted chronologically:
     events.sort(key=lambda event: event["time"])
+    # A separate list containing only timestamps is created for fast searching.
     event_times = [event["time"] for event in events]
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,6 +57,7 @@ def main():
         for timestamp, label in images:
             first = bisect_right(event_times, timestamp)
             last = bisect_left(event_times, timestamp + timedelta(hours=24))
+            # If several flares occur during the next 24 hours, they are sorted from strongest to weakest.
             window = sorted(
                 events[first:last],
                 key=lambda event: flare_strength(event["goes_class"]),
@@ -65,6 +69,7 @@ def main():
                 goes_class = strongest["goes_class"]
                 longitude = strongest["fl_lon"] or "UNK"
                 latitude = strongest["fl_lat"] or "UNK"
+                # Any remaining flares are stored separately:
                 rest_fl = [event["goes_class"] for event in window[1:]]
                 rest_lon = [event["fl_lon"] or "UNK" for event in window[1:]]
                 rest_lat = [event["fl_lat"] or "UNK" for event in window[1:]]

@@ -32,7 +32,7 @@ def download_from_helioviewer():
         hours = datetime.timedelta(minutes=12)
         dt = dt+ hours
         final_date = str(dt.date()) + 'T' + str(dt.time()) + 'Z'
-        if dt.year>2021:
+        if dt.year>2027:
             break
         Path(f'{basedir}/{dt.year}/{dt.month:02d}/{dt.day:02d}').mkdir(parents=True, exist_ok=True)
         #Defining name of downloaded images based on the date and time
