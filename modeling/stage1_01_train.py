@@ -116,7 +116,7 @@ def main():
         epochs_per_stage = int(tracker.config["epochs_per_stage"])
         learning_rate = float(tracker.config["learning_rate"])
         weight_decay = float(tracker.config["weight_decay"])
-        early_stopping_patience = int(tracker.config["early_stopping_patience"])
+        early_stopping_patience = int(tracker.config[" early_stopping_patience"])
         early_stopping_min_delta = float(
             tracker.config["early_stopping_min_delta"]
         )
