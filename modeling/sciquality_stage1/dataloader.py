@@ -97,7 +97,7 @@ Guarantees all original FL images are used first,
 then cycles evenly through enabled augmented FL views until the required balanced length is reached.
 '''
 class ControlledFlareDataset(Dataset):
-    """Use original FL images first, then cycle through augmented views."""
+    """Use every original FL image, then augment across the full FL set."""
 
     def __init__(self, flare_views, length):
         self.views = flare_views
@@ -114,8 +114,14 @@ class ControlledFlareDataset(Dataset):
 
         extra_index = index - self.original_count
         augmented_views = self.views[1:] or self.views
-        view = augmented_views[extra_index % len(augmented_views)]
-        sample_index = (extra_index // len(augmented_views)) % self.original_count
+        # Complete one pass over all FL images before repeating a source image.
+        sample_index = extra_index % self.original_count
+        pass_number = extra_index // self.original_count
+
+        # Shift the transformation on each pass so repeated images receive
+        # different augmented views when more than one view is available.
+        view_index = (sample_index + pass_number) % len(augmented_views)
+        view = augmented_views[view_index]
         return view[sample_index]
 
 
