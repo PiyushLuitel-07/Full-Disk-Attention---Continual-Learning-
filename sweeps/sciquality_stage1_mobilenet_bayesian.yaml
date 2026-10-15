@@ -1,0 +1,81 @@
+name: sciquality_stage1_mobilenet_bayesian
+program: modeling/sciquality_stage1/train.py
+method: bayes
+
+# Select the best Stage 1 trial using future validation performance.
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.001
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.000001
+    max: 0.001
+
+  batch_size:
+    values: [16, 32]
+
+  optimizer:
+    value: adamw
+
+  classifier_hidden_dim:
+    values: [512, 1024, 1280]
+
+  dropout:
+    distribution: uniform
+    min: 0.1
+    max: 0.4
+
+  use_vertical_flip:
+    values: [false, true]
+
+  use_rotation_180:
+    values: [false, true]
+
+  # Fixed experiment settings.
+  pretrained:
+    value: true
+
+  image_size:
+    value: 512
+
+  epochs:
+    value: 200
+
+  early_stopping_patience:
+    value: 30
+
+  early_stopping_min_delta:
+    value: 0.001
+
+  scheduler_patience:
+    value: 8
+
+  scheduler_factor:
+    value: 0.3
+
+  min_learning_rate:
+    value: 0.0000001
+
+  gradient_clip_norm:
+    value: 5.0
+
+  momentum:
+    value: 0.9
+
+  num_workers:
+    value: 8
+
+  random_seed:
+    value: 42
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
