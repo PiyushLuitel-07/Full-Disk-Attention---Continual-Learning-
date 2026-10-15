@@ -281,6 +281,7 @@ def main():
             image_size=image_size,
             num_workers=NUM_WORKERS,
             pin_memory=device.type == "cuda",
+            augmentations=config["augmentations"],
         )
 
         print("\nEvaluating fixed pre-Stage-3 retention baselines...")

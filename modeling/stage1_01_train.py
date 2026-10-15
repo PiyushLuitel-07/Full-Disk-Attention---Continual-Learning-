@@ -88,10 +88,10 @@ def main():
         "augmentations": [
             "original",
             "horizontal_flip",
-            "vertical_flip",
-            "rotation_180",
             "small_rotation",
         ],
+        "use_vertical_flip": False,
+        "use_rotation_180": False,
         "fisher_data": "not calculated during Stage 1 sweep trials",
         "stages": [1],
         "stage_periods": {1: "2010-12 to 2017-12"},
@@ -116,13 +116,23 @@ def main():
         epochs_per_stage = int(tracker.config["epochs_per_stage"])
         learning_rate = float(tracker.config["learning_rate"])
         weight_decay = float(tracker.config["weight_decay"])
-        early_stopping_patience = int(tracker.config[" early_stopping_patience"])
+        early_stopping_patience = int(tracker.config["early_stopping_patience"])
         early_stopping_min_delta = float(
             tracker.config["early_stopping_min_delta"]
         )
         scheduler_factor = float(tracker.config["scheduler_factor"])
         scheduler_patience = int(tracker.config["scheduler_patience"])
         min_learning_rate = float(tracker.config["min_learning_rate"])
+
+        # Always retain the conservative views. The sweep independently
+        # decides whether to add the two orientation-changing transforms.
+        augmentations = ["original", "horizontal_flip", "small_rotation"]
+        if bool(tracker.config["use_vertical_flip"]):
+            augmentations.append("vertical_flip")
+        if bool(tracker.config["use_rotation_180"]):
+            augmentations.append("rotation_180")
+        tracker.update_config({"augmentations": augmentations})
+        print(f"FL training views: {augmentations}")
 
         model = Attn_Net(
             im_size=IMAGE_SIZE,
@@ -143,6 +153,7 @@ def main():
             image_size=IMAGE_SIZE,
             num_workers=NUM_WORKERS,
             pin_memory=device.type == "cuda",
+            augmentations=augmentations,
         )
 
         optimizer = SGD(

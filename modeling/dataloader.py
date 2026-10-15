@@ -10,6 +10,7 @@ import torchvision.transforms.functional as TF
 
 from PIL import Image
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
+from torchvision.transforms import InterpolationMode
 
 
 # ---------------------------------------------------------------------
@@ -105,6 +106,8 @@ class FlareTrainingTransform:
             image = TF.rotate(
                 image,
                 angle,
+                interpolation=InterpolationMode.BILINEAR,
+                fill=0,
             )
 
         # Convert the PIL image to a tensor with values from 0 to 1.
@@ -405,6 +408,7 @@ def build_stage_loaders(
     image_size=256,
     num_workers=4,
     pin_memory=True,
+    augmentations=None,
 ):
     """
     Build three DataLoaders for one continual-learning stage.
@@ -437,17 +441,21 @@ def build_stage_loaders(
         class_value=0,
     )
 
-    augmentation_names = [
-        "original",
-        "horizontal_flip",
-        "vertical_flip",
-        "rotation_180",
-        "small_rotation",
-    ]
+    if augmentations is None:
+        augmentations = [
+            "original",
+            "horizontal_flip",
+            "vertical_flip",
+            "rotation_180",
+            "small_rotation",
+        ]
+
+    if not augmentations:
+        raise ValueError("At least one FL training view is required.")
 
     flare_views = []
 
-    for augmentation_name in augmentation_names:
+    for augmentation_name in augmentations:
         flare_transform = FlareTrainingTransform(
             augmentation=augmentation_name,
             image_size=image_size,

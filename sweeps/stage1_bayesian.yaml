@@ -25,6 +25,17 @@ parameters:
       - 128
       - 256
 
+  # Four controlled combinations: neither, either one, or both.
+  use_vertical_flip:
+    values:
+      - false
+      - true
+
+  use_rotation_180:
+    values:
+      - false
+      - true
+
   epochs_per_stage:
     value: 100
 

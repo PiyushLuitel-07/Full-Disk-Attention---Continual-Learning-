@@ -49,6 +49,13 @@ class ExperimentTracker:
         self.run.define_metric("retention/*", step_metric="completed_stage")
         self.run.define_metric("forgetting/*", step_metric="completed_stage")
 
+    def update_config(self, values):
+        """Update the in-memory, W&B, and local copies of the run config."""
+        self.config.update(values)
+        self.run.config.update(values, allow_val_change=True)
+        with (self.directory / "config.json").open("w") as config_file:
+            json.dump(self.config, config_file, indent=2)
+
     @staticmethod
     def _append_csv(csv_path, row):
         """Append one dictionary as one CSV row."""
