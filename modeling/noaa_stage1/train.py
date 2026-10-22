@@ -213,7 +213,8 @@ def main():
         "train_csv": str(TRAIN_CSV),
         "holdout_csv": str(HOLDOUT_CSV),
         "validation_csv": str(VALIDATION_CSV),
-        "pytorch_version": torch.__version__,
+        # Store a plain string so PyTorch's safe checkpoint loader accepts it.
+        "pytorch_version": str(torch.__version__),
     }
     run.config.update(system_config, allow_val_change=True)
     config.update(system_config)
@@ -334,7 +335,11 @@ def main():
             break
 
     # Restore the selected epoch before final validation.
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=device,
+        weights_only=True,
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     final_holdout = run_epoch(model, loaders["holdout"], criterion, device)
     validation = run_epoch(model, validation_loader, criterion, device)
