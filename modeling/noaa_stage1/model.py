@@ -4,7 +4,12 @@ from torch import nn
 from torchvision.models import MobileNet_V3_Large_Weights, mobilenet_v3_large
 
 
-def build_model(num_classes=2, pretrained=True, hidden_dim=1280):
+def build_model(
+    num_classes=2,
+    pretrained=True,
+    hidden_dim=1280,
+    freeze_backbone=False,
+):
     """Return MobileNetV3-Large with an NF/FL classifier and no dropout."""
     # Start from features learned on ImageNet instead of random weights.
     weights = MobileNet_V3_Large_Weights.DEFAULT if pretrained else None
@@ -17,4 +22,11 @@ def build_model(num_classes=2, pretrained=True, hidden_dim=1280):
         nn.Hardswish(),
         nn.Linear(hidden_dim, num_classes),
     )
+
+    # Classifier-only training preserves all pretrained feature weights.
+    if freeze_backbone:
+        for parameter in model.features.parameters():
+            parameter.requires_grad = False
+
+    model.backbone_frozen = freeze_backbone
     return model

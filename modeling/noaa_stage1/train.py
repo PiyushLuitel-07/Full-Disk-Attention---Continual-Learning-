@@ -40,6 +40,7 @@ WANDB_PROJECT = "Full disk attention solar flare prediction with continual learn
 CONFIG = {
     "model": "mobilenet_v3_large",
     "pretrained": True,
+    "freeze_backbone": True,
     "image_size": 512,
     "batch_size": 128,
     "epochs": 40,
@@ -75,6 +76,11 @@ def run_epoch(model, loader, criterion, device, optimizer=None):
     # Supplying an optimizer enables training; otherwise this is evaluation.
     training = optimizer is not None
     model.train(training)
+
+    # Frozen BatchNorm layers must not update their running statistics.
+    if training and model.backbone_frozen:
+        model.features.eval()
+
     predictions, targets = [], []
     loss_sum = torch.zeros((), device=device)
     image_count = 0
@@ -136,10 +142,13 @@ def main():
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"noaa_stage1_diagnostic_{timestamp}",
+        name=f"noaa_stage1_classifier_only_{timestamp}",
         config=CONFIG,
         dir=str(run_dir),
-        tags=["NOAA", "Stage-1", "MobileNetV3-Large", "diagnostic"],
+        tags=[
+            "NOAA", "Stage-1", "MobileNetV3-Large",
+            "diagnostic", "classifier-only",
+        ],
         job_type="stage1-diagnostic",
     )
     config = dict(run.config)
@@ -170,13 +179,20 @@ def main():
         num_workers=int(config["num_workers"]),
     )
 
-    # Fine-tune every layer of the ImageNet-pretrained model.
-    model = build_model(pretrained=bool(config["pretrained"])).to(device)
+    # Preserve the ImageNet feature extractor and train only the classifier.
+    model = build_model(
+        pretrained=bool(config["pretrained"]),
+        freeze_backbone=bool(config["freeze_backbone"]),
+    ).to(device)
     criterion = nn.CrossEntropyLoss()
 
     # AdamW applies weight decay separately from the adaptive gradient update.
     optimizer = AdamW(
-        model.parameters(),
+        (
+            parameter
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        ),
         lr=float(config["learning_rate"]),
         weight_decay=float(config["weight_decay"]),
     )

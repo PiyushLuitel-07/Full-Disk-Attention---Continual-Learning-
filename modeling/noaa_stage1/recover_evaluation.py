@@ -50,7 +50,10 @@ def main():
         VALIDATION_CSV, IMAGE_DIR, batch_size, workers
     )
 
-    model = build_model(pretrained=False).to(device)
+    model = build_model(
+        pretrained=False,
+        freeze_backbone=bool(config.get("freeze_backbone", False)),
+    ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     criterion = nn.CrossEntropyLoss()
 
