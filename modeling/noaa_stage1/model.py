@@ -9,6 +9,7 @@ def build_model(
     pretrained=True,
     hidden_dim=1280,
     freeze_backbone=False,
+    trainable_backbone_blocks=0,
 ):
     """Return MobileNetV3-Large with an NF/FL classifier and no dropout."""
     # Start from features learned on ImageNet instead of random weights.
@@ -23,10 +24,25 @@ def build_model(
         nn.Linear(hidden_dim, num_classes),
     )
 
-    # Classifier-only training preserves all pretrained feature weights.
+    # Freeze the complete feature extractor first.
     if freeze_backbone:
         for parameter in model.features.parameters():
             parameter.requires_grad = False
 
-    model.backbone_frozen = freeze_backbone
+        # For partial fine-tuning, reopen only the requested final blocks.
+        # MobileNetV3-Large's final two entries are its last inverted-residual
+        # block and the final convolution before global average pooling.
+        blocks_to_train = int(trainable_backbone_blocks)
+        if blocks_to_train > 0:
+            for block in model.features[-blocks_to_train:]:
+                for parameter in block.parameters():
+                    parameter.requires_grad = True
+
+    # run_epoch uses this boundary to keep only the frozen BatchNorm layers
+    # in evaluation mode while the reopened final blocks continue training.
+    model.frozen_feature_blocks = (
+        len(model.features) - int(trainable_backbone_blocks)
+        if freeze_backbone
+        else 0
+    )
     return model

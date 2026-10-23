@@ -53,6 +53,9 @@ def main():
     model = build_model(
         pretrained=False,
         freeze_backbone=bool(config.get("freeze_backbone", False)),
+        trainable_backbone_blocks=int(
+            config.get("trainable_backbone_blocks", 0)
+        ),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     criterion = nn.CrossEntropyLoss()

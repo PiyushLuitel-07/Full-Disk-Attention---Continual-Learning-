@@ -41,6 +41,7 @@ CONFIG = {
     "model": "mobilenet_v3_large",
     "pretrained": True,
     "freeze_backbone": True,
+    "trainable_backbone_blocks": 2,
     "image_size": 512,
     "batch_size": 128,
     "epochs": 40,
@@ -77,9 +78,10 @@ def run_epoch(model, loader, criterion, device, optimizer=None):
     training = optimizer is not None
     model.train(training)
 
-    # Frozen BatchNorm layers must not update their running statistics.
-    if training and model.backbone_frozen:
-        model.features.eval()
+    # Keep BatchNorm statistics fixed only in the frozen feature blocks.
+    if training:
+        for block in model.features[:model.frozen_feature_blocks]:
+            block.eval()
 
     predictions, targets = [], []
     loss_sum = torch.zeros((), device=device)
@@ -142,12 +144,12 @@ def main():
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"noaa_stage1_classifier_only_{timestamp}",
+        name=f"noaa_stage1_partial_finetune_{timestamp}",
         config=CONFIG,
         dir=str(run_dir),
         tags=[
             "NOAA", "Stage-1", "MobileNetV3-Large",
-            "diagnostic", "classifier-only",
+            "diagnostic", "partial-finetuning",
         ],
         job_type="stage1-diagnostic",
     )
@@ -179,10 +181,12 @@ def main():
         num_workers=int(config["num_workers"]),
     )
 
-    # Preserve the ImageNet feature extractor and train only the classifier.
+    # Train the last inverted-residual block, final convolution and classifier.
+    # Earlier ImageNet feature blocks remain frozen.
     model = build_model(
         pretrained=bool(config["pretrained"]),
         freeze_backbone=bool(config["freeze_backbone"]),
+        trainable_backbone_blocks=int(config["trainable_backbone_blocks"]),
     ).to(device)
     criterion = nn.CrossEntropyLoss()
 
