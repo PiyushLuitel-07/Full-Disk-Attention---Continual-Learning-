@@ -45,11 +45,10 @@ CONFIG = {
     "image_size": 512,
     "batch_size": 128,
     "epochs": 40,
-    "backbone_learning_rate": 1e-5,
     "learning_rate": 1e-4,
     "weight_decay": 1e-2,
     "optimizer": "adamw",
-    "dropout": 0.0,
+    "dropout": 0.1,
     "augmentation": "none",
     "early_stopping_patience": 10,
     "early_stopping_min_delta": 0.001,
@@ -145,12 +144,12 @@ def main():
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"noaa_stage1_differential_lr_{timestamp}",
+        name=f"noaa_stage1_dropout_01_{timestamp}",
         config=CONFIG,
         dir=str(run_dir),
         tags=[
             "NOAA", "Stage-1", "MobileNetV3-Large",
-            "diagnostic", "partial-finetuning", "differential-learning-rate",
+            "diagnostic", "partial-finetuning", "dropout-0.1",
         ],
         job_type="stage1-diagnostic",
     )
@@ -186,28 +185,21 @@ def main():
     # Earlier ImageNet feature blocks remain frozen.
     model = build_model(
         pretrained=bool(config["pretrained"]),
+        dropout=float(config["dropout"]),
         freeze_backbone=bool(config["freeze_backbone"]),
         trainable_backbone_blocks=int(config["trainable_backbone_blocks"]),
     ).to(device)
     criterion = nn.CrossEntropyLoss()
 
-    # Update the reopened feature blocks ten times more slowly than the new
-    # classifier so pretrained features are not changed too aggressively.
+    # Use the same learning rate for the reopened blocks and classifier so
+    # dropout is the only experimental change from the previous best setup.
     optimizer = AdamW(
-        [
-            {
-                "params": [
-                    parameter
-                    for parameter in model.features.parameters()
-                    if parameter.requires_grad
-                ],
-                "lr": float(config["backbone_learning_rate"]),
-            },
-            {
-                "params": model.classifier.parameters(),
-                "lr": float(config["learning_rate"]),
-            },
-        ],
+        (
+            parameter
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        ),
+        lr=float(config["learning_rate"]),
         weight_decay=float(config["weight_decay"]),
     )
     # Reduce the learning rate when holdout CSS stops improving.
@@ -252,10 +244,14 @@ def main():
     run.define_metric("epoch")
     for group in ("balanced_train", "natural_train", "holdout"):
         run.define_metric(f"{group}/*", step_metric="epoch")
+    # These groups are evaluated once after restoring the selected checkpoint.
+    run.define_metric("best_holdout/*")
+    run.define_metric("validation/*")
 
     # The holdout CSS determines which epoch is saved as the selected model.
     checkpoint_path = run_dir / "stage1_best.pt"
     metrics_path = run_dir / "epoch_metrics.csv"
+    final_metrics_path = run_dir / "final_metrics.csv"
     best_css = float("-inf")
     best_epoch = 0
     epochs_without_improvement = 0
@@ -287,8 +283,7 @@ def main():
         holdout_metrics = run_epoch(model, loaders["holdout"], criterion, device)
         holdout_seconds = time.perf_counter() - start
 
-        backbone_learning_rate = optimizer.param_groups[0]["lr"]
-        classifier_learning_rate = optimizer.param_groups[1]["lr"]
+        learning_rate = optimizer.param_groups[0]["lr"]
         scheduler.step(holdout_metrics["css"])
         cumulative_nf.update(sampler.last_nf_indices)
 
@@ -331,10 +326,7 @@ def main():
         # Prefix metric names so W&B creates separate chart groups.
         logged = {
             "epoch": epoch,
-            # Keep the old name for classifier-LR chart compatibility.
-            "learning_rate": classifier_learning_rate,
-            "backbone_learning_rate": backbone_learning_rate,
-            "classifier_learning_rate": classifier_learning_rate,
+            "learning_rate": learning_rate,
             "best_holdout_css": best_css,
             "best_epoch": best_epoch,
             "epochs_without_improvement": epochs_without_improvement,
@@ -355,10 +347,18 @@ def main():
 
         print(
             f"Epoch {epoch:02d} | "
-            f"balanced loss={balanced_metrics['loss']:.4f} | "
-            f"natural loss={natural_metrics['loss']:.4f} | "
-            f"holdout loss={holdout_metrics['loss']:.4f} | "
-            f"CSS={holdout_metrics['css']:.4f} | "
+            f"balanced: loss={balanced_metrics['loss']:.4f}, "
+            f"CSS={balanced_metrics['css']:.4f}, "
+            f"TSS={balanced_metrics['tss']:.4f}, "
+            f"HSS={balanced_metrics['hss']:.4f} | "
+            f"natural: loss={natural_metrics['loss']:.4f}, "
+            f"CSS={natural_metrics['css']:.4f}, "
+            f"TSS={natural_metrics['tss']:.4f}, "
+            f"HSS={natural_metrics['hss']:.4f} | "
+            f"holdout: loss={holdout_metrics['loss']:.4f}, "
+            f"CSS={holdout_metrics['css']:.4f}, "
+            f"TSS={holdout_metrics['tss']:.4f}, "
+            f"HSS={holdout_metrics['hss']:.4f} | "
             f"NF coverage={sampling_metrics['nf_cumulative_coverage']:.1%} | "
             f"time={epoch_seconds:.1f}s"
         )
@@ -387,17 +387,43 @@ def main():
     for name, value in final_results.items():
         run.summary[name] = value
 
+    # Save every selected-holdout and validation metric locally as well.
+    with final_metrics_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["metric", "value"])
+        writer.writerows(final_results.items())
+
     # Upload the selected checkpoint and epoch history as one W&B artifact.
     artifact = wandb.Artifact(
         f"noaa-stage1-{run.id}", type="model", metadata=config
     )
     artifact.add_file(str(checkpoint_path))
     artifact.add_file(str(metrics_path))
+    artifact.add_file(str(final_metrics_path))
     run.log_artifact(artifact)
     run.finish()
 
-    print(f"Best epoch: {best_epoch} | holdout CSS: {best_css:.4f}")
-    print(f"Validation CSS: {validation['css']:.4f}")
+    print(f"Best epoch: {best_epoch}")
+    print(
+        "Selected holdout | "
+        f"loss={final_holdout['loss']:.4f} | "
+        f"CSS={final_holdout['css']:.4f} | "
+        f"TSS={final_holdout['tss']:.4f} | "
+        f"HSS={final_holdout['hss']:.4f} | "
+        f"precision={final_holdout['precision']:.4f} | "
+        f"recall={final_holdout['recall']:.4f} | "
+        f"F1={final_holdout['f1']:.4f}"
+    )
+    print(
+        "Validation | "
+        f"loss={validation['loss']:.4f} | "
+        f"CSS={validation['css']:.4f} | "
+        f"TSS={validation['tss']:.4f} | "
+        f"HSS={validation['hss']:.4f} | "
+        f"precision={validation['precision']:.4f} | "
+        f"recall={validation['recall']:.4f} | "
+        f"F1={validation['f1']:.4f}"
+    )
     print(f"Checkpoint: {checkpoint_path}")
 
 

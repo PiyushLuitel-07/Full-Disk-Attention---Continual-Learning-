@@ -52,6 +52,7 @@ def main():
 
     model = build_model(
         pretrained=False,
+        dropout=float(config.get("dropout", 0.0)),
         freeze_backbone=bool(config.get("freeze_backbone", False)),
         trainable_backbone_blocks=int(
             config.get("trainable_backbone_blocks", 0)
