@@ -45,6 +45,7 @@ CONFIG = {
     "image_size": 512,
     "batch_size": 128,
     "epochs": 40,
+    "backbone_learning_rate": 1e-5,
     "learning_rate": 1e-4,
     "weight_decay": 1e-2,
     "optimizer": "adamw",
@@ -144,12 +145,12 @@ def main():
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"noaa_stage1_partial_finetune_{timestamp}",
+        name=f"noaa_stage1_differential_lr_{timestamp}",
         config=CONFIG,
         dir=str(run_dir),
         tags=[
             "NOAA", "Stage-1", "MobileNetV3-Large",
-            "diagnostic", "partial-finetuning",
+            "diagnostic", "partial-finetuning", "differential-learning-rate",
         ],
         job_type="stage1-diagnostic",
     )
@@ -190,14 +191,23 @@ def main():
     ).to(device)
     criterion = nn.CrossEntropyLoss()
 
-    # AdamW applies weight decay separately from the adaptive gradient update.
+    # Update the reopened feature blocks ten times more slowly than the new
+    # classifier so pretrained features are not changed too aggressively.
     optimizer = AdamW(
-        (
-            parameter
-            for parameter in model.parameters()
-            if parameter.requires_grad
-        ),
-        lr=float(config["learning_rate"]),
+        [
+            {
+                "params": [
+                    parameter
+                    for parameter in model.features.parameters()
+                    if parameter.requires_grad
+                ],
+                "lr": float(config["backbone_learning_rate"]),
+            },
+            {
+                "params": model.classifier.parameters(),
+                "lr": float(config["learning_rate"]),
+            },
+        ],
         weight_decay=float(config["weight_decay"]),
     )
     # Reduce the learning rate when holdout CSS stops improving.
@@ -277,7 +287,8 @@ def main():
         holdout_metrics = run_epoch(model, loaders["holdout"], criterion, device)
         holdout_seconds = time.perf_counter() - start
 
-        learning_rate = optimizer.param_groups[0]["lr"]
+        backbone_learning_rate = optimizer.param_groups[0]["lr"]
+        classifier_learning_rate = optimizer.param_groups[1]["lr"]
         scheduler.step(holdout_metrics["css"])
         cumulative_nf.update(sampler.last_nf_indices)
 
@@ -320,7 +331,10 @@ def main():
         # Prefix metric names so W&B creates separate chart groups.
         logged = {
             "epoch": epoch,
-            "learning_rate": learning_rate,
+            # Keep the old name for classifier-LR chart compatibility.
+            "learning_rate": classifier_learning_rate,
+            "backbone_learning_rate": backbone_learning_rate,
+            "classifier_learning_rate": classifier_learning_rate,
             "best_holdout_css": best_css,
             "best_epoch": best_epoch,
             "epochs_without_improvement": epochs_without_improvement,
