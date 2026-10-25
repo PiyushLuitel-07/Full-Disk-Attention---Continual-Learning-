@@ -36,7 +36,7 @@ WANDB_ENTITY = "piyush-luitel-texas-christian-university"
 WANDB_PROJECT = "Full disk attention solar flare prediction with continual learning"
 
 
-# Fixed diagnostic configuration; 
+# Fixed settings plus the three values overridden by the W&B sweep.
 CONFIG = {
     "model": "mobilenet_v3_large",
     "pretrained": True,
@@ -48,7 +48,7 @@ CONFIG = {
     "learning_rate": 1e-4,
     "weight_decay": 1e-2,
     "optimizer": "adamw",
-    "dropout": 0.1,
+    "dropout": 0.0,
     "augmentation": "none",
     "early_stopping_patience": 10,
     "early_stopping_min_delta": 0.001,
@@ -144,14 +144,14 @@ def main():
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"noaa_stage1_dropout_01_{timestamp}",
+        name=f"noaa_stage1_hyperparameter_trial_{timestamp}",
         config=CONFIG,
         dir=str(run_dir),
         tags=[
             "NOAA", "Stage-1", "MobileNetV3-Large",
-            "diagnostic", "partial-finetuning", "dropout-0.1",
+            "hyperparameter-tuning", "partial-finetuning", "no-dropout",
         ],
-        job_type="stage1-diagnostic",
+        job_type="stage1-hyperparameter-tuning",
     )
     config = dict(run.config)
 
@@ -191,8 +191,8 @@ def main():
     ).to(device)
     criterion = nn.CrossEntropyLoss()
 
-    # Use the same learning rate for the reopened blocks and classifier so
-    # dropout is the only experimental change from the previous best setup.
+    # The sweep supplies one common learning rate and weight decay for all
+    # trainable parameters: the final two feature blocks and classifier.
     optimizer = AdamW(
         (
             parameter
@@ -323,6 +323,16 @@ def main():
             "epoch_seconds": epoch_seconds,
         }
 
+        # Natural training is a diagnostic classification evaluation. Its loss
+        # is intentionally omitted because the natural and balanced class
+        # distributions differ substantially, making that loss easy to
+        # misinterpret when presenting the experiment.
+        natural_logged_metrics = {
+            key: value
+            for key, value in natural_metrics.items()
+            if key != "loss"
+        }
+
         # Prefix metric names so W&B creates separate chart groups.
         logged = {
             "epoch": epoch,
@@ -331,7 +341,7 @@ def main():
             "best_epoch": best_epoch,
             "epochs_without_improvement": epochs_without_improvement,
             **{f"balanced_train/{k}": v for k, v in balanced_metrics.items()},
-            **{f"natural_train/{k}": v for k, v in natural_metrics.items()},
+            **{f"natural_train/{k}": v for k, v in natural_logged_metrics.items()},
             **{f"holdout/{k}": v for k, v in holdout_metrics.items()},
             **{f"sampling/{k}": v for k, v in sampling_metrics.items()},
             **{f"timing/{k}": v for k, v in timing_metrics.items()},
@@ -345,20 +355,31 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
 
+        print(f"Epoch {epoch:02d}/{int(config['epochs'])}")
         print(
-            f"Epoch {epoch:02d} | "
-            f"balanced: loss={balanced_metrics['loss']:.4f}, "
-            f"CSS={balanced_metrics['css']:.4f}, "
-            f"TSS={balanced_metrics['tss']:.4f}, "
-            f"HSS={balanced_metrics['hss']:.4f} | "
-            f"natural: loss={natural_metrics['loss']:.4f}, "
-            f"CSS={natural_metrics['css']:.4f}, "
-            f"TSS={natural_metrics['tss']:.4f}, "
-            f"HSS={natural_metrics['hss']:.4f} | "
-            f"holdout: loss={holdout_metrics['loss']:.4f}, "
-            f"CSS={holdout_metrics['css']:.4f}, "
-            f"TSS={holdout_metrics['tss']:.4f}, "
-            f"HSS={holdout_metrics['hss']:.4f} | "
+            "  Balanced training | "
+            f"loss={balanced_metrics['loss']:.4f} | "
+            f"CSS={balanced_metrics['css']:.4f} | "
+            f"TSS={balanced_metrics['tss']:.4f} | "
+            f"HSS={balanced_metrics['hss']:.4f}"
+        )
+        print(
+            "  Natural training  | "
+            f"CSS={natural_metrics['css']:.4f} | "
+            f"TSS={natural_metrics['tss']:.4f} | "
+            f"HSS={natural_metrics['hss']:.4f}"
+        )
+        print(
+            "  Holdout evaluation | "
+            f"loss={holdout_metrics['loss']:.4f} | "
+            f"CSS={holdout_metrics['css']:.4f} | "
+            f"TSS={holdout_metrics['tss']:.4f} | "
+            f"HSS={holdout_metrics['hss']:.4f}"
+        )
+        print(
+            "  Progress           | "
+            f"best epoch={best_epoch} | "
+            f"best holdout CSS={best_css:.4f} | "
             f"NF coverage={sampling_metrics['nf_cumulative_coverage']:.1%} | "
             f"time={epoch_seconds:.1f}s"
         )
@@ -401,8 +422,8 @@ def main():
     artifact.add_file(str(metrics_path))
     artifact.add_file(str(final_metrics_path))
     run.log_artifact(artifact)
-    run.finish()
 
+    # Print before run.finish() so W&B also captures this final summary.
     print(f"Best epoch: {best_epoch}")
     print(
         "Selected holdout | "
@@ -415,6 +436,11 @@ def main():
         f"F1={final_holdout['f1']:.4f}"
     )
     print(
+        "Selected holdout confusion matrix | "
+        f"TP={final_holdout['tp']} | TN={final_holdout['tn']} | "
+        f"FP={final_holdout['fp']} | FN={final_holdout['fn']}"
+    )
+    print(
         "Validation | "
         f"loss={validation['loss']:.4f} | "
         f"CSS={validation['css']:.4f} | "
@@ -424,7 +450,13 @@ def main():
         f"recall={validation['recall']:.4f} | "
         f"F1={validation['f1']:.4f}"
     )
+    print(
+        "Validation confusion matrix | "
+        f"TP={validation['tp']} | TN={validation['tn']} | "
+        f"FP={validation['fp']} | FN={validation['fn']}"
+    )
     print(f"Checkpoint: {checkpoint_path}")
+    run.finish()
 
 
 if __name__ == "__main__":
