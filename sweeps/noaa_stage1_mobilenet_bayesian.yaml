@@ -2,9 +2,6 @@ name: noaa_stage1_mobilenet_bayesian
 program: modeling/noaa_stage1/train.py
 method: bayes
 
-# Each trial selects its best epoch using holdout CSS, restores that
-# checkpoint, and reports validation CSS once. The sweep ranks trials using
-# the separate validation period; the test period remains untouched.
 metric:
   name: validation/css
   goal: maximize

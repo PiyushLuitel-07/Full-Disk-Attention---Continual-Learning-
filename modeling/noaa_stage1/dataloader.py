@@ -48,37 +48,42 @@ class CyclicBalancedSampler(Sampler):
         self.random = random.Random(seed)
         self.nf_pool = self.nf_indices.copy()
         self.random.shuffle(self.nf_pool)
-        self.position = 0
-        self.epoch = 0
-        self.cycle = 1
-        self.last_nf_indices = []
+        self.position = 0 #This records the next unused position in the shuffled NF list.
+        self.epoch = 0 # starting from the 0th epoch
+        self.cycle = 1 # starting from 1st cycle
+        self.last_nf_indices = [] # store the NF indices used in the last epoch
 
+# Number of samples per epoch is twice the number of FL images.
     def __len__(self):
         return 2 * len(self.fl_indices)
-
+    # Refill the NF pool if necessary at the start of a new epoch.
+    # This runs when the sampler reaches the end of all 38,015 NF images.
     def _refill(self, already_selected):
         """Start a new shuffle without duplicating NF images within an epoch."""
-        self.cycle += 1
+        self.cycle += 1 # increment the cycle count each time the NF pool is refilled
         self.nf_pool = self.nf_indices.copy()
         self.random.shuffle(self.nf_pool)
 
         # Move NF images already used in this epoch to the end of the new pool.
         selected = set(already_selected)
+        # '''Move NF images already used in this epoch to the end of the new pool.'''
         self.nf_pool.sort(key=lambda index: index in selected)
-        self.position = 0
-
+        self.position = 0 #Starts reading the newly shuffled pool from the beginning.
+    # Select NF images for an epoch
     def __iter__(self):
         # Draw as many NF images as there are FL images.
         selected_nf = []
         required = len(self.fl_indices)
 
         while len(selected_nf) < required:
+            # It checks whether every NF image in the current shuffled pool has been used:
             if self.position == len(self.nf_pool):
+                # If yes, it reshuffles all NF images and starts a new cycle:
                 self._refill(selected_nf)
 
-            needed = required - len(selected_nf)
-            available = len(self.nf_pool) - self.position
-            take = min(needed, available)
+            needed = required - len(selected_nf) #how many NF images are still required;
+            available = len(self.nf_pool) - self.position #how many NF images are still available in the current pool
+            take = min(needed, available) #how many NF images to take from the current pool
             selected_nf.extend(self.nf_pool[self.position:self.position + take])
             self.position += take
 
