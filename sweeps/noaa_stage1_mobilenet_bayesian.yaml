@@ -1,5 +1,5 @@
 name: noaa_stage1_mobilenet_bayesian
-program: modeling/noaa_stage1/train.py
+program: modeling/experiment_01_noaa_stage1_cyclic_balanced/train.py
 method: bayes
 
 metric:
