@@ -56,6 +56,20 @@ class CyclicBalancedSampler(Sampler):
 # Number of samples per epoch is twice the number of FL images.
     def __len__(self):
         return 2 * len(self.fl_indices)
+
+
+    '''
+    Why _refill() is needed
+Suppose an epoch requires 8,623 NF images, but only 3,523 unused NF images remain in the current pool.
+
+The sampler:
+1. Takes those remaining 3,523 images.
+2. Refills and reshuffles the NF pool.
+3. Takes another 5,100 images from the new pool.
+\[
+3,523+5,100=8,623
+\]
+    '''
     # Refill the NF pool if necessary at the start of a new epoch.
     # This runs when the sampler reaches the end of all 38,015 NF images.
     def _refill(self, already_selected):
@@ -64,6 +78,7 @@ class CyclicBalancedSampler(Sampler):
         self.nf_pool = self.nf_indices.copy()
         self.random.shuffle(self.nf_pool)
 
+        # Stores the NF images already included in the current epoch.
         # Move NF images already used in this epoch to the end of the new pool.
         selected = set(already_selected)
         # '''Move NF images already used in this epoch to the end of the new pool.'''
@@ -84,6 +99,7 @@ class CyclicBalancedSampler(Sampler):
             needed = required - len(selected_nf) #how many NF images are still required;
             available = len(self.nf_pool) - self.position #how many NF images are still available in the current pool
             take = min(needed, available) #how many NF images to take from the current pool
+            # Adds that portion of the NF pool and advances the reading position.
             selected_nf.extend(self.nf_pool[self.position:self.position + take])
             self.position += take
 
