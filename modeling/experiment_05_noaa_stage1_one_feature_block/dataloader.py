@@ -7,6 +7,7 @@ import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -35,12 +36,14 @@ class MagnetogramDataset(Dataset):
         return tensor, target
 
 
-def _loader(dataset, batch_size, num_workers, shuffle=False):
+def _loader(dataset, batch_size, num_workers, shuffle=False, sampler=None):
     """Create a DataLoader with shared performance settings."""
     settings = {
         "dataset": dataset,
         "batch_size": batch_size,
-        "shuffle": shuffle,
+        # A sampler controls ordering in DDP, so DataLoader cannot also shuffle.
+        "shuffle": shuffle if sampler is None else False,
+        "sampler": sampler,
         "num_workers": num_workers,
         "pin_memory": True,
     }
@@ -50,15 +53,33 @@ def _loader(dataset, batch_size, num_workers, shuffle=False):
 
 
 def build_loaders(train_csv, holdout_csv, image_directory, batch_size=64,
-                  num_workers=8):
+                  num_workers=8, distributed=False, rank=0, world_size=1):
     """Build complete training and unchanged holdout loaders."""
     train_data = MagnetogramDataset(train_csv, image_directory)
     holdout_data = MagnetogramDataset(holdout_csv, image_directory)
 
+    # Each DDP process receives a different part of the shuffled training set.
+    train_sampler = None
+    if distributed:
+        train_sampler = DistributedSampler(
+            train_data,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=42,
+        )
+
     return {
         # All 46,638 original training images are used every epoch.
-        "train": _loader(train_data, batch_size, num_workers, shuffle=True),
+        "train": _loader(
+            train_data,
+            batch_size,
+            num_workers,
+            shuffle=True,
+            sampler=train_sampler,
+        ),
         "holdout": _loader(holdout_data, batch_size, num_workers),
+        "train_sampler": train_sampler,
         "class_counts": torch.bincount(
             torch.tensor(train_data.targets), minlength=2
         ),
