@@ -6,7 +6,7 @@ from pathlib import Path
 # Repository and data locations.
 ROOT = Path(__file__).resolve().parents[2]
 LABEL_DIR = ROOT / "data_labeling" / "data_labels" / "noaa" / "CL_Labels"
-IMAGE_DIR = ROOT / "download_mag" / "images"
+IMAGE_DIR = ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIR = ROOT / "results" / "noaa_stage1_differential_lr"
 
 TRAIN_CSV = LABEL_DIR / "Stage1_train.csv"
