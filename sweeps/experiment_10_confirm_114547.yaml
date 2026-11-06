@@ -1,0 +1,58 @@
+name: experiment_10_confirm_114547
+program: modeling/experiment_10_noaa_stage1_seed_confirmation/train.py
+method: grid
+
+# Candidate 114547 is fixed; only the random seed changes.
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  backbone_learning_rate:
+    value: 0.0000013649297100111978
+
+  classifier_lr_multiplier:
+    value: 20
+
+  fl_class_weight:
+    value: 1.990129625950856
+
+  weight_decay:
+    value: 0.05328805613626618
+
+  nf_class_weight:
+    value: 1.0
+
+  batch_size:
+    value: 64
+
+  epochs:
+    value: 80
+
+  early_stopping_patience:
+    value: 15
+
+  early_stopping_min_delta:
+    value: 0.001
+
+  scheduler_patience:
+    value: 5
+
+  scheduler_factor:
+    value: 0.3
+
+  dropout:
+    value: 0.0
+
+  augmentation:
+    value: none
+
+  random_seed:
+    values:
+      - 123
+      - 2026
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
