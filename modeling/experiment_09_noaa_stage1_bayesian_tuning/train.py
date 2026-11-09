@@ -98,7 +98,7 @@ def build_optimizer(
             },
             {
                 "params": groups["classifier_decay"],
-                "lr": classifier_learning_rate,
+                "lr": classifier_learn ing_rate,
                 "weight_decay": weight_decay,
                 "group_name": "classifier_decay",
             },

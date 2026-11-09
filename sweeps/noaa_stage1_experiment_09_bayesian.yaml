@@ -15,7 +15,7 @@ parameters:
     min: 1.0
     max: 2.2
 
-  # Regularize convolutional and linear weights, excluding bias and norm.
+  # Regularize convolutional and linear weights
   weight_decay:
     distribution: log_uniform_values
     min: 0.02
