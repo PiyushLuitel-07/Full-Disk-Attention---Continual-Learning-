@@ -1,0 +1,32 @@
+{
+  "augmentation": "none",
+  "batch_size": 8,
+  "class_counts": {
+    "FL": 8623,
+    "NF": 38015
+  },
+  "data_csv": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/data_labeling/data_labels/noaa/CL_Labels/Stage1_train.csv",
+  "estimator": "per_example_empirical_fisher",
+  "formula": "mean_i(square(gradient_i(negative_log_likelihood)))",
+  "model_mode": "eval",
+  "num_workers": 8,
+  "samples": 46638,
+  "schema_version": 1,
+  "seconds": 1418.9524453390623,
+  "source_checkpoint": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/noaa_stage1_seed_confirmation/mobilenet_stage1_20261106_223444/stage1_best.pt",
+  "source_checkpoint_sha256": "bbdbb6e73067c4caf0f19f1df81743ea53e6364af50ed243be0f331b6eff815e",
+  "source_selected_epoch": 10,
+  "stage": 1,
+  "statistics": {
+    "max": 1463.68701171875,
+    "mean": 0.025484664365649223,
+    "p50": 1.281915137951728e-05,
+    "p95": 0.0027840277180075645,
+    "p99": 0.03100821189582348,
+    "parameter_elements": 4204594,
+    "parameter_tensors": 174,
+    "sum": 107152.6640625,
+    "zero_fraction": 0.009753379039466381
+  },
+  "uses_ground_truth_labels": true
+}
