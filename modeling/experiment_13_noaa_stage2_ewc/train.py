@@ -63,6 +63,30 @@ def parse_args():
         help="Non-negative EWC strength; use 0 for the no-EWC baseline.",
     )
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument(
+        "--nf-class-weight",
+        type=float,
+        default=None,
+        help="Override the NF cross-entropy weight from config.py.",
+    )
+    parser.add_argument(
+        "--fl-class-weight",
+        type=float,
+        default=None,
+        help="Override the FL cross-entropy weight from config.py.",
+    )
+    parser.add_argument(
+        "--backbone-learning-rate",
+        type=float,
+        default=None,
+        help="Override the backbone learning rate from config.py.",
+    )
+    parser.add_argument(
+        "--classifier-lr-multiplier",
+        type=float,
+        default=None,
+        help="Override the classifier/backbone learning-rate multiplier.",
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
@@ -283,6 +307,17 @@ def main():
         if args.epochs <= 0:
             raise ValueError("--epochs must be positive.")
         config["epochs"] = int(args.epochs)
+    for argument_name, config_name in (
+        ("nf_class_weight", "nf_class_weight"),
+        ("fl_class_weight", "fl_class_weight"),
+        ("backbone_learning_rate", "backbone_learning_rate"),
+        ("classifier_lr_multiplier", "classifier_lr_multiplier"),
+    ):
+        value = getattr(args, argument_name)
+        if value is not None:
+            if value <= 0:
+                raise ValueError(f"--{argument_name.replace('_', '-')} must be positive.")
+            config[config_name] = float(value)
     config["classifier_learning_rate"] = (
         float(config["backbone_learning_rate"])
         * float(config["classifier_lr_multiplier"])
