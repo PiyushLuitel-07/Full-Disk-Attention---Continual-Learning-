@@ -87,6 +87,7 @@ CONFIG = {
     # Selection balances current Stage 2 learning with Stage 1 retention.
     # Future validation remains untouched until final evaluation.
     "checkpoint_selection": "geometric_mean_stage1_stage2_holdout_css",
+    "checkpoint_candidates": "epoch_0_and_all_stage2_training_epochs",
 }
 
 

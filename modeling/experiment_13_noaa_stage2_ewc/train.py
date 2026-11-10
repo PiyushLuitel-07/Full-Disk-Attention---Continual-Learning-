@@ -220,7 +220,11 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, config, metrics, a
     """Write a selected Stage 2 checkpoint plus immutable Stage 1 EWC history."""
     torch.save(
         {
-            "completed_stage": 2,
+            # Epoch 0 is the untouched Stage 1 anchor.  It is a valid model
+            # selection baseline, but it must not be mislabeled as a model
+            # that has completed Stage 2 adaptation.
+            "completed_stage": 2 if epoch > 0 else 1,
+            "stage2_adapted": epoch > 0,
             "architecture": "mobilenet_v3_large",
             "experiment": "corrected_stage2_ewc",
             "epoch": epoch,
@@ -375,12 +379,14 @@ def main():
 
     anchor_stage1 = evaluate(model, loaders["stage1_holdout"], criterion, device)
     anchor_stage2 = evaluate(model, loaders["stage2_holdout"], criterion, device)
+    anchor_joint_css = joint_css(anchor_stage1, anchor_stage2)
     print(f"Device: {device} | GPUs=1")
     print(f"Results: {run_dir}")
     print(f"EWC anchor: {args.anchor}")
     print(f"EWC lambda: {config['ewc_lambda']:.6g}")
     print(f"Stage 1 anchor holdout CSS: {anchor_stage1['css']:.4f}")
     print(f"Before Stage 2 training | Stage 2 holdout CSS: {anchor_stage2['css']:.4f}")
+    print(f"Epoch 0 joint CSS: {anchor_joint_css:.4f}")
     print(
         "Stage 2 data: "
         f"NF={stage2_counts[0]:,}, FL={stage2_counts[1]:,}, total={sum(stage2_counts):,}"
@@ -391,21 +397,47 @@ def main():
         run.define_metric(f"{group}/*", step_metric="epoch")
     run.define_metric("best/*")
     run.define_metric("future_validation/*")
-    run.log(
-        {
-            "stage1_anchor/" + key: value
-            for key, value in anchor_stage1.items()
-        }
-        | {
-            "stage2_before_training/" + key: value
-            for key, value in anchor_stage2.items()
-        }
-    )
+    initial_metrics = {
+        "epoch": 0,
+        "selection/joint_css": anchor_joint_css,
+        "selection/stage1_css_retention_ratio": 1.0,
+        "best/joint_css": anchor_joint_css,
+        "best/epoch": 0,
+        **{f"stage1_holdout/{key}": value for key, value in anchor_stage1.items()},
+        **{f"stage2_holdout/{key}": value for key, value in anchor_stage2.items()},
+        **{f"stage1_anchor/{key}": value for key, value in anchor_stage1.items()},
+        **{f"stage2_before_training/{key}": value for key, value in anchor_stage2.items()},
+    }
+    run.log(initial_metrics)
 
-    best_joint_css = float("-inf")
+    initial_path = run_dir / "initial_metrics.csv"
+    with initial_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["metric", "value"])
+        writer.writerows(
+            (key, value)
+            for key, value in initial_metrics.items()
+            if key not in {"epoch"}
+        )
+
+    best_joint_css = anchor_joint_css
     best_epoch = 0
     without_improvement = 0
     checkpoint_path = run_dir / "stage2_best.pt"
+    save_checkpoint(
+        checkpoint_path,
+        model,
+        optimizer,
+        scheduler,
+        0,
+        config,
+        {
+            "joint_css": anchor_joint_css,
+            "stage1_holdout": anchor_stage1,
+            "stage2_holdout": anchor_stage2,
+        },
+        anchor_cpu,
+    )
     rows = []
     history = {"epoch": []}
     for group in ("stage2_train", "stage1_holdout", "stage2_holdout"):
@@ -546,11 +578,17 @@ def main():
         },
     )
     artifact.add_file(str(checkpoint_path))
+    artifact.add_file(str(initial_path))
     artifact.add_file(str(run_dir / "epoch_metrics.csv"))
     artifact.add_file(str(final_path))
     run.log_artifact(artifact)
 
     print(f"Best epoch: {checkpoint['epoch']}")
+    if checkpoint["epoch"] == 0:
+        print(
+            "No Stage 2 training epoch surpassed the unadapted epoch 0 model "
+            "under the joint CSS selection rule."
+        )
     print(
         "Selected Stage 1 retention | "
         f"CSS={selected_stage1['css']:.4f} | recall={selected_stage1['recall']:.4f} | "
