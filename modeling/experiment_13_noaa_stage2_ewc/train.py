@@ -231,7 +231,7 @@ def train_epoch(
 
 
 def joint_css(stage1_metrics, stage2_metrics):
-    """Balance retention and new-stage learning without future-data leakage."""
+    """Return the cross-stage score for reporting, not checkpoint selection."""
     return math.sqrt(max(0.0, stage1_metrics["css"]) * max(0.0, stage2_metrics["css"]))
 
 
@@ -244,11 +244,9 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, config, metrics, a
     """Write a selected Stage 2 checkpoint plus immutable Stage 1 EWC history."""
     torch.save(
         {
-            # Epoch 0 is the untouched Stage 1 anchor.  It is a valid model
-            # selection baseline, but it must not be mislabeled as a model
-            # that has completed Stage 2 adaptation.
-            "completed_stage": 2 if epoch > 0 else 1,
-            "stage2_adapted": epoch > 0,
+            # Only epochs that completed Stage 2 training are eligible.
+            "completed_stage": 2,
+            "stage2_adapted": True,
             "architecture": "mobilenet_v3_large",
             "experiment": "corrected_stage2_ewc",
             "epoch": epoch,
@@ -422,6 +420,7 @@ def main():
     print(f"Stage 1 anchor holdout CSS: {anchor_stage1['css']:.4f}")
     print(f"Before Stage 2 training | Stage 2 holdout CSS: {anchor_stage2['css']:.4f}")
     print(f"Epoch 0 joint CSS: {anchor_joint_css:.4f}")
+    print("Epoch 0 is a reference baseline only; checkpoint selection starts at epoch 1.")
     print(
         "Stage 2 data: "
         f"NF={stage2_counts[0]:,}, FL={stage2_counts[1]:,}, total={sum(stage2_counts):,}"
@@ -434,10 +433,9 @@ def main():
     run.define_metric("future_validation/*")
     initial_metrics = {
         "epoch": 0,
+        "selection/stage2_css": anchor_stage2["css"],
         "selection/joint_css": anchor_joint_css,
         "selection/stage1_css_retention_ratio": 1.0,
-        "best/joint_css": anchor_joint_css,
-        "best/epoch": 0,
         **{f"stage1_holdout/{key}": value for key, value in anchor_stage1.items()},
         **{f"stage2_holdout/{key}": value for key, value in anchor_stage2.items()},
         **{f"stage1_anchor/{key}": value for key, value in anchor_stage1.items()},
@@ -455,24 +453,12 @@ def main():
             if key not in {"epoch"}
         )
 
-    best_joint_css = anchor_joint_css
-    best_epoch = 0
+    best_stage2_css = float("-inf")
+    best_stage2_recall = float("-inf")
+    best_joint_css = float("nan")
+    best_epoch = None
     without_improvement = 0
     checkpoint_path = run_dir / "stage2_best.pt"
-    save_checkpoint(
-        checkpoint_path,
-        model,
-        optimizer,
-        scheduler,
-        0,
-        config,
-        {
-            "joint_css": anchor_joint_css,
-            "stage1_holdout": anchor_stage1,
-            "stage2_holdout": anchor_stage2,
-        },
-        anchor_cpu,
-    )
     rows = []
     history = {"epoch": []}
     for group in ("stage2_train", "stage1_holdout", "stage2_holdout"):
@@ -494,14 +480,21 @@ def main():
         )
         stage1_holdout = evaluate(model, loaders["stage1_holdout"], criterion, device)
         stage2_holdout = evaluate(model, loaders["stage2_holdout"], criterion, device)
-        selection_score = joint_css(stage1_holdout, stage2_holdout)
+        stage2_selection_css = stage2_holdout["css"]
+        stage2_css_gap = stage2_train["css"] - stage2_holdout["css"]
+        diagnostic_joint_css = joint_css(stage1_holdout, stage2_holdout)
         scheduler.step(stage2_holdout["css"])
 
-        improved = selection_score > best_joint_css + float(config["early_stopping_min_delta"])
-        if improved:
-            best_joint_css = selection_score
+        previous_best_stage2_css = best_stage2_css
+        checkpoint_improved = stage2_selection_css > best_stage2_css
+        meaningful_improvement = stage2_selection_css > (
+            previous_best_stage2_css + float(config["early_stopping_min_delta"])
+        )
+        if checkpoint_improved:
+            best_stage2_css = stage2_selection_css
+            best_stage2_recall = stage2_holdout["recall"]
+            best_joint_css = diagnostic_joint_css
             best_epoch = epoch
-            without_improvement = 0
             save_checkpoint(
                 checkpoint_path,
                 model,
@@ -510,19 +503,34 @@ def main():
                 epoch,
                 config,
                 {
-                    "joint_css": selection_score,
+                    "selection_metric": "stage2_holdout_css",
+                    "stage2_holdout_css": stage2_selection_css,
+                    "stage2_holdout_recall": stage2_holdout["recall"],
+                    "stage2_train_css": stage2_train["css"],
+                    "stage2_train_holdout_css_gap": stage2_css_gap,
+                    "joint_css": diagnostic_joint_css,
+                    "stage1_css_retention_ratio": (
+                        stage1_holdout["css"] / anchor_stage1["css"]
+                        if anchor_stage1["css"] > 0
+                        else 0.0
+                    ),
                     "stage1_holdout": stage1_holdout,
                     "stage2_holdout": stage2_holdout,
                 },
                 anchor_cpu,
             )
+
+        if meaningful_improvement:
+            without_improvement = 0
         else:
             without_improvement += 1
 
         elapsed = time.perf_counter() - started
         logged = {
             "epoch": epoch,
-            "selection/joint_css": selection_score,
+            "selection/stage2_css": stage2_selection_css,
+            "selection/joint_css": diagnostic_joint_css,
+            "diagnostics/stage2_train_holdout_css_gap": stage2_css_gap,
             "selection/stage1_css_retention_ratio": (
                 stage1_holdout["css"] / anchor_stage1["css"]
                 if anchor_stage1["css"] > 0
@@ -530,7 +538,9 @@ def main():
             ),
             "learning_rate/backbone": optimizer.param_groups[0]["lr"],
             "learning_rate/classifier": optimizer.param_groups[2]["lr"],
-            "best/joint_css": best_joint_css,
+            "best/stage2_css": best_stage2_css,
+            "best/stage2_recall": best_stage2_recall,
+            "best/joint_css_at_selected_epoch": best_joint_css,
             "best/epoch": best_epoch,
             "epochs_without_improvement": without_improvement,
             "timing/epoch_seconds": elapsed,
@@ -569,8 +579,10 @@ def main():
         )
         print(
             "  Progress | "
-            f"joint CSS={selection_score:.4f} | best epoch={best_epoch} | "
-            f"best joint CSS={best_joint_css:.4f} | time={elapsed:.1f}s"
+            f"Stage 2 CSS={stage2_selection_css:.4f} | joint CSS={diagnostic_joint_css:.4f} | "
+            f"train-holdout gap={stage2_css_gap:.4f} | "
+            f"best epoch={best_epoch} | best Stage 2 CSS={best_stage2_css:.4f} | "
+            f"time={elapsed:.1f}s"
         )
 
         if without_improvement >= int(config["early_stopping_patience"]):
@@ -587,7 +599,19 @@ def main():
 
     final_metrics = {
         "selected_epoch": checkpoint["epoch"],
+        "selected_stage2_css": checkpoint["selection_metrics"]["stage2_holdout_css"],
+        "selected_stage2_recall": checkpoint["selection_metrics"]["stage2_holdout_recall"],
+        "selected_stage2_train_css": checkpoint["selection_metrics"]["stage2_train_css"],
+        "selected_stage2_train_holdout_css_gap": checkpoint["selection_metrics"][
+            "stage2_train_holdout_css_gap"
+        ],
         "selected_joint_css": checkpoint["selection_metrics"]["joint_css"],
+        "stage2_css_delta_from_epoch0": selected_stage2["css"] - anchor_stage2["css"],
+        "stage1_css_retention_ratio": (
+            selected_stage1["css"] / anchor_stage1["css"]
+            if anchor_stage1["css"] > 0
+            else 0.0
+        ),
         **{f"stage1_retention/{key}": value for key, value in selected_stage1.items()},
         **{f"stage2_holdout/{key}": value for key, value in selected_stage2.items()},
         **{f"future_validation/{key}": value for key, value in future_validation.items()},
@@ -619,11 +643,10 @@ def main():
     run.log_artifact(artifact)
 
     print(f"Best epoch: {checkpoint['epoch']}")
-    if checkpoint["epoch"] == 0:
-        print(
-            "No Stage 2 training epoch surpassed the unadapted epoch 0 model "
-            "under the joint CSS selection rule."
-        )
+    print(
+        "Selection rule: maximum Stage 2 holdout CSS among adapted epochs; "
+        "epoch 0 was reference-only."
+    )
     print(
         "Selected Stage 1 retention | "
         f"CSS={selected_stage1['css']:.4f} | recall={selected_stage1['recall']:.4f} | "

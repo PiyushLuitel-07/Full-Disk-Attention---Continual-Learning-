@@ -84,10 +84,19 @@ CONFIG = {
     "fisher_use_ground_truth_labels": True,
     "fisher_model_mode": "eval",
     "fisher_normalization": "divide_by_number_of_examples",
-    # Selection balances current Stage 2 learning with Stage 1 retention.
-    # Future validation remains untouched until final evaluation.
-    "checkpoint_selection": "geometric_mean_stage1_stage2_holdout_css",
-    "checkpoint_candidates": "epoch_0_and_all_stage2_training_epochs",
+    # Follow the Stage 1 protocol: Stage 2 holdout CSS drives the scheduler,
+    # early stopping, and checkpoint choice. Select the adapted epoch with the
+    # highest Stage 2 holdout CSS. Epoch 0 is reference-only; future validation
+    # is evaluated after this within-run choice has been made.
+    "checkpoint_selection": "maximum_stage2_holdout_css",
+    "checkpoint_candidates": "stage2_training_epochs_only",
+    "checkpoint_diagnostics": [
+        "stage2_holdout_recall",
+        "stage2_holdout_false_positive_rate",
+        "stage2_train_holdout_css_gap",
+        "stage1_css_retention_ratio",
+        "joint_css",
+    ],
 }
 
 
