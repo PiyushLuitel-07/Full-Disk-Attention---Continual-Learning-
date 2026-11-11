@@ -37,9 +37,11 @@ CONFIG = {
     "dropout": 0.0,
     "image_size": 512,
 
-    # Stage 2 uses every original image. No augmentation is included in this
-    # first EWC experiment, keeping EWC as the only continual-learning change.
-    "sampling": "full_training_data",
+    # Stage 2 always draws only original images. The default is uniform
+    # sampling; an optional recency-weighted sampler can upweight examples
+    # closer to the final Stage 2 training date without reading holdout data.
+    "sampling": "uniform_full_training_data",
+    "recency_half_life_months": 0.0,
     "augmentation": "none",
     "batch_size": 64,
     "num_workers": 8,

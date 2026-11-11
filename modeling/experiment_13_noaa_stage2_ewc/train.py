@@ -87,6 +87,15 @@ def parse_args():
         default=None,
         help="Override the classifier/backbone learning-rate multiplier.",
     )
+    parser.add_argument(
+        "--recency-half-life-months",
+        type=float,
+        default=None,
+        help=(
+            "If positive, sample recent Stage 2 training images more often "
+            "using this exponential half-life. Zero keeps uniform sampling."
+        ),
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
@@ -305,6 +314,11 @@ def main():
         if args.epochs <= 0:
             raise ValueError("--epochs must be positive.")
         config["epochs"] = int(args.epochs)
+    if args.recency_half_life_months is not None:
+        if args.recency_half_life_months <= 0:
+            raise ValueError("--recency-half-life-months must be positive.")
+        config["recency_half_life_months"] = float(args.recency_half_life_months)
+        config["sampling"] = "recency_weighted_full_training_data"
     for argument_name, config_name in (
         ("nf_class_weight", "nf_class_weight"),
         ("fl_class_weight", "fl_class_weight"),
@@ -353,7 +367,7 @@ def main():
         "stage2_holdout_csv": STAGE2_HOLDOUT_CSV,
         "future_validation_csv": FUTURE_VALIDATION_CSV,
     }
-    loaders = build_stage2_loaders(config, paths)
+    loaders, stage2_sampling_metadata = build_stage2_loaders(config, paths)
     stage1_counts = class_counts(loaders["stage1_fisher"].dataset)
     stage2_counts = class_counts(loaders["stage2_train"].dataset)
 
@@ -403,6 +417,7 @@ def main():
             "stage1_train_fl": stage1_counts[1],
             "stage2_train_nf": stage2_counts[0],
             "stage2_train_fl": stage2_counts[1],
+            "stage2_sampling_metadata": stage2_sampling_metadata,
             "device": str(device),
             "gpu_count_used": 1 if device.type == "cuda" else 0,
             "multi_gpu_method": "none",
@@ -425,6 +440,7 @@ def main():
         "Stage 2 data: "
         f"NF={stage2_counts[0]:,}, FL={stage2_counts[1]:,}, total={sum(stage2_counts):,}"
     )
+    print(f"Stage 2 sampling: {stage2_sampling_metadata}")
 
     run.define_metric("epoch")
     for group in ("stage2_train", "stage1_holdout", "stage2_holdout"):
