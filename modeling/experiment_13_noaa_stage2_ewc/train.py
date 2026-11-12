@@ -96,6 +96,14 @@ def parse_args():
             "using this exponential half-life. Zero keeps uniform sampling."
         ),
     )
+    parser.add_argument(
+        "--adapt-batchnorm-running-stats",
+        action="store_true",
+        help=(
+            "Update BatchNorm running mean/variance on Stage 2 training batches. "
+            "By default, Stage 1 running statistics remain frozen."
+        ),
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
@@ -310,6 +318,11 @@ def main():
 
     config = dict(CONFIG)
     config["ewc_lambda"] = float(args.ewc_lambda)
+    if args.adapt_batchnorm_running_stats:
+        config["freeze_batchnorm_running_stats"] = False
+        config["batchnorm_running_stats_mode"] = "adapt_on_stage2_training_batches"
+    else:
+        config["batchnorm_running_stats_mode"] = "frozen_at_stage1_anchor"
     if args.epochs is not None:
         if args.epochs <= 0:
             raise ValueError("--epochs must be positive.")
@@ -405,7 +418,15 @@ def main():
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
         name=args.run_name or f"noaa_stage2_ewc_lambda_{args.ewc_lambda:g}_{timestamp}",
-        tags=WANDB_TAGS + (["ewc-baseline"] if args.ewc_lambda == 0 else ["ewc"]),
+        tags=(
+            WANDB_TAGS
+            + (["ewc-baseline"] if args.ewc_lambda == 0 else ["ewc"])
+            + (
+                ["batchnorm-stage2-adaptation"]
+                if args.adapt_batchnorm_running_stats
+                else ["batchnorm-stage1-frozen"]
+            )
+        ),
         job_type="stage2-ewc-training",
         dir=str(run_dir),
         config={
@@ -432,6 +453,7 @@ def main():
     print(f"Results: {run_dir}")
     print(f"EWC anchor: {args.anchor}")
     print(f"EWC lambda: {config['ewc_lambda']:.6g}")
+    print(f"BatchNorm running statistics: {config['batchnorm_running_stats_mode']}")
     print(f"Stage 1 anchor holdout CSS: {anchor_stage1['css']:.4f}")
     print(f"Before Stage 2 training | Stage 2 holdout CSS: {anchor_stage2['css']:.4f}")
     print(f"Epoch 0 joint CSS: {anchor_joint_css:.4f}")

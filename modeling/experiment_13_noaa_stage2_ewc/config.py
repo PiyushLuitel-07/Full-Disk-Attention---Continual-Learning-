@@ -60,8 +60,11 @@ CONFIG = {
     "max_gradient_norm": 5.0,
     # BatchNorm running statistics are buffers, not parameters, so EWC cannot
     # penalize their drift. Keep those statistics fixed at the Stage 1 values
-    # while still allowing BatchNorm affine parameters to learn under EWC.
+    # by default while still allowing BatchNorm affine parameters to learn
+    # under EWC. The training CLI can opt into Stage 2 statistics adaptation
+    # for a controlled distribution-shift ablation.
     "freeze_batchnorm_running_stats": True,
+    "batchnorm_running_stats_mode": "frozen_at_stage1_anchor",
 
     # Keep the selected Stage 1 mild weighting for the first Stage 2 control.
     # EWC lambda will be chosen only after inspecting the corrected Fisher
