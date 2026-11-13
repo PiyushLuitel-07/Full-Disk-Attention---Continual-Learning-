@@ -133,7 +133,7 @@ def main():
         "stage2_train_fl": counts[1], "sampling_metadata": sampling, "device": str(device),
         "initial_ewc_penalty": anchor_penalty}, allow_val_change=True)
     base1, base2 = evaluate(model, loaders["stage1_holdout"], loss_fn, device), evaluate(model, loaders["stage2_holdout"], loss_fn, device)
-    print(f"Results: {out}\nDevice: {device}\nStage 2 data: NF={counts[0]:,}, FL={counts[1]:,}")
+    print(f"Results: {out}\nDevice: {device} | batch={c['batch_size']}\nStage 2 data: NF={counts[0]:,}, FL={counts[1]:,}")
     print(f"lambda={c['ewc_lambda']:.3g} | backbone LR={c['backbone_learning_rate']:.2e} | classifier LR={c['classifier_learning_rate']:.2e}")
     print(f"weight decay={c['weight_decay']:.4f} | smoothing={c['label_smoothing']:.3f} | BN={c['batchnorm_running_stats_mode']}")
     print(f"Initial EWC penalty={anchor_penalty:.3g} | Epoch 0 | Stage 1 CSS={base1['css']:.4f} | Stage 2 CSS={base2['css']:.4f}")

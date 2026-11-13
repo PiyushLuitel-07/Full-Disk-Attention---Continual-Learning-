@@ -35,7 +35,10 @@ parameters:
   # excluded because they repeatedly produced excessive Stage 2 false alarms.
   fl_class_weight:
     values: [1.0, 1.15, 1.3, 1.5, 1.75, 2.0]
-  batch_size: {value: 64}
+  # Larger batches use more GPU memory and fewer optimizer updates per epoch.
+  # All values preserve the same original-image, EWC-only protocol.
+  batch_size:
+    values: [48, 64, 128]
   epochs: {value: 40}
   early_stopping_patience: {value: 10}
   scheduler_patience: {value: 3}
