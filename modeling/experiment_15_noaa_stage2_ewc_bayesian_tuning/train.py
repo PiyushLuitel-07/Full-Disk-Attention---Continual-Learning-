@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 EXP13 = ROOT / "modeling/experiment_13_noaa_stage2_ewc"
-sys.path[:0] = [str(HERE), str(EXP13), str(ROOT)]
+sys.path[:0] = [str(HERE), str(EXP13), str(ROOT / "modeling"), str(ROOT)]
 from config import (ANCHOR, CONFIG, IMAGE_DIR, RESULTS_DIR, STAGE1_HOLDOUT_CSV, STAGE1_TRAIN_CSV,  # noqa: E402
     STAGE2_HOLDOUT_CSV, STAGE2_TRAIN_CSV, VALIDATION_CSV, WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS)
 from dataloader import build_stage2_loaders, class_counts  # noqa: E402
@@ -114,6 +114,10 @@ def main():
     model = build_model(pretrained=False, hidden_dim=c["classifier_hidden_dim"], dropout=0.).to(device)
     model.load_state_dict(anchor["model_state_dict"], strict=True)
     anchors = [move_ewc_anchor_to_device(anchor["ewc_history"][0], device)]
+    if anchors[0]["stage"] != 1: raise ValueError("Experiment 15 requires a Stage 1 EWC anchor")
+    with torch.no_grad(): anchor_penalty = ewc_penalty(model, anchors).item()
+    if not math.isfinite(anchor_penalty) or abs(anchor_penalty) > 1e-10:
+        raise ValueError(f"Anchor/model mismatch: initial EWC penalty is {anchor_penalty}")
     paths = {"image_directory": IMAGE_DIR, "stage1_train_csv": STAGE1_TRAIN_CSV,
         "stage1_holdout_csv": STAGE1_HOLDOUT_CSV, "stage2_train_csv": STAGE2_TRAIN_CSV,
         "stage2_holdout_csv": STAGE2_HOLDOUT_CSV, "future_validation_csv": VALIDATION_CSV}
@@ -126,12 +130,13 @@ def main():
         patience=c["scheduler_patience"], threshold=c["early_stopping_min_delta"], threshold_mode="abs",
         min_lr=[c["min_backbone_learning_rate"]] * 2 + [c["min_classifier_learning_rate"]] * 2)
     run.config.update({"source_ewc_anchor": str(a.anchor.resolve()), "stage2_train_nf": counts[0],
-        "stage2_train_fl": counts[1], "sampling_metadata": sampling, "device": str(device)}, allow_val_change=True)
+        "stage2_train_fl": counts[1], "sampling_metadata": sampling, "device": str(device),
+        "initial_ewc_penalty": anchor_penalty}, allow_val_change=True)
     base1, base2 = evaluate(model, loaders["stage1_holdout"], loss_fn, device), evaluate(model, loaders["stage2_holdout"], loss_fn, device)
     print(f"Results: {out}\nDevice: {device}\nStage 2 data: NF={counts[0]:,}, FL={counts[1]:,}")
     print(f"lambda={c['ewc_lambda']:.3g} | backbone LR={c['backbone_learning_rate']:.2e} | classifier LR={c['classifier_learning_rate']:.2e}")
     print(f"weight decay={c['weight_decay']:.4f} | smoothing={c['label_smoothing']:.3f} | BN={c['batchnorm_running_stats_mode']}")
-    print(f"Epoch 0 | Stage 1 CSS={base1['css']:.4f} | Stage 2 CSS={base2['css']:.4f}")
+    print(f"Initial EWC penalty={anchor_penalty:.3g} | Epoch 0 | Stage 1 CSS={base1['css']:.4f} | Stage 2 CSS={base2['css']:.4f}")
     run.define_metric("epoch")
     for group in ("stage2_train", "stage1_holdout", "stage2_holdout"): run.define_metric(f"{group}/*", step_metric="epoch")
     initial = {"epoch": 0, **prefixed("stage1_holdout", base1), **prefixed("stage2_holdout", base2)}
