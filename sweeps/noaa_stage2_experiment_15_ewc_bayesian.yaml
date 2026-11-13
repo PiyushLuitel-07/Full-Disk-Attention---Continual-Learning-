@@ -18,11 +18,11 @@ parameters:
     min: 0.0000002
     max: 0.0000015
   classifier_lr_multiplier:
-    values: [2, 5, 10]
+    values: [2, 5, 10, 20, 50]
   weight_decay:
     distribution: log_uniform_values
     min: 0.02
-    max: 0.35
+    max: 0.8
   label_smoothing:
     distribution: uniform
     min: 0.0
