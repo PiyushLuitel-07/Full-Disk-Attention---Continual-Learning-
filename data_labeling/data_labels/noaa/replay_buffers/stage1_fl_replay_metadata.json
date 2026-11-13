@@ -1,0 +1,23 @@
+{
+  "source_csv": "data_labeling/data_labels/noaa/CL_Labels/Stage1_train.csv",
+  "output_csv": "data_labeling/data_labels/noaa/replay_buffers/stage1_fl_replay_1500.csv",
+  "selection": "stage1_fl_only_temporally_thinned_random_selection",
+  "random_seed": 123,
+  "requested_buffer_size": 1655,
+  "actual_buffer_size": 1655,
+  "thinning_hours": 6,
+  "available_stage1_fl_before_thinning": 8623,
+  "available_stage1_fl_after_thinning": 1655,
+  "class_counts": {
+    "NF": 0,
+    "FL": 1655
+  },
+  "year_counts": {
+    "2011": 242,
+    "2012": 263,
+    "2013": 278,
+    "2014": 507,
+    "2015": 318,
+    "2016": 47
+  }
+}
