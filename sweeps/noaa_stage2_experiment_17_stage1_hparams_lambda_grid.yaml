@@ -1,0 +1,23 @@
+name: noaa_stage2_experiment_17_stage1_hparams_lambda_grid
+program: modeling/experiment_17_noaa_stage2_stage1_hparams_lambda_tuning/train.py
+method: grid
+
+# Within each run, Stage 2 holdout CSS selects the checkpoint. The later
+# validation period compares lambdas. The test period is intentionally unused.
+metric:
+  name: validation/css
+  goal: maximize
+
+# This is a controlled one-factor ablation. Every other setting is loaded from
+# the selected Stage 1 checkpoint metadata and is identical in all eight runs.
+parameters:
+  ewc_lambda:
+    # 0 is the no-EWC control. The remaining values form a broad,
+    # approximately logarithmic search centered on the penalty scale measured
+    # in our own Stage 2 pilot, rather than copying a value from another task.
+    values: [0.01, 0.1, 1, 10, 25, 50, 100, 250, 500, 750, 1000, 1250, 1500, 1800, 2000, 2500, 5000]
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
