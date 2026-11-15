@@ -8,14 +8,16 @@ metric:
   name: validation/css
   goal: maximize
 
-# This is a controlled one-factor ablation. Every other setting is loaded from
-# the selected Stage 1 checkpoint metadata and is identical in all eight runs.
+# This is a controlled lambda ablation with three independent Stage 2 seeds.
+# Every non-seed setting is loaded from the selected Stage 1 checkpoint.
 parameters:
   ewc_lambda:
-    # 0 is the no-EWC control. The remaining values form a broad,
-    # approximately logarithmic search centered on the penalty scale measured
-    # in our own Stage 2 pilot, rather than copying a value from another task.
-    values: [0.01, 0.1, 1, 10, 25, 50, 100, 250, 500, 750, 1000, 1250, 1500, 1800, 2000, 2500, 5000]
+    # 0 is the no-EWC control. The high-lambda region is deliberately dense:
+    # the earlier balanced Stage 2 candidate was near lambda=3788.
+    values: [0, 5, 10, 25, 50, 100, 250, 500, 750, 1000, 1500, 2000, 2250, 2500, 2750, 3000, 3500, 4000, 4500, 5000]
+  # Replication factor only: three independent Stage 2 minibatch orders.
+  random_seed:
+    values: [42, 123, 2026]
 
 command:
   - ${env}

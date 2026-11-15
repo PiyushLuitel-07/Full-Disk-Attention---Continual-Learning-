@@ -134,7 +134,7 @@ def log_learning_curves(run, history):
 
 
 def resolve_config(run, anchor, cli_lambda):
-    c, source = dict(CONFIG), anchor.get("source_stage1_config")
+    c, source, sweep = dict(CONFIG), anchor.get("source_stage1_config"), dict(run.config)
     if not isinstance(source, dict): raise ValueError("EWC anchor lacks source_stage1_config")
     missing = [key for key in STAGE1_KEYS if key not in source]
     if missing: raise ValueError(f"Stage 1 configuration is missing: {missing}")
@@ -142,7 +142,10 @@ def resolve_config(run, anchor, cli_lambda):
                   for key in STAGE1_KEYS if CONFIG[key] != source[key]}
     if mismatched: raise ValueError(f"Documented Stage 1 settings disagree with the EWC anchor: {mismatched}")
     c.update({key: source[key] for key in STAGE1_KEYS})
-    c["ewc_lambda"] = float(cli_lambda if cli_lambda is not None else run.config["ewc_lambda"])
+    # The selected Stage 1 seed remains the default. The sweep can explicitly
+    # replace it only to replicate each lambda under a new Stage 2 shuffle.
+    c["random_seed"] = int(sweep.get("random_seed", c["random_seed"]))
+    c["ewc_lambda"] = float(cli_lambda if cli_lambda is not None else sweep["ewc_lambda"])
     c["classifier_learning_rate"] = float(c["backbone_learning_rate"]) * float(c["classifier_lr_multiplier"])
     if c["ewc_lambda"] < 0: raise ValueError("ewc_lambda must be non-negative")
     run.config.update(c, allow_val_change=True)
@@ -189,7 +192,9 @@ def main():
         "stage1_holdout_samples": len(loaders["stage1_holdout"].dataset),
         "stage2_holdout_samples": len(loaders["stage2_holdout"].dataset),
         "validation_samples": len(loaders["future_validation"].dataset),
-        "initial_ewc_penalty": initial_penalty, "only_tuned_parameter": "ewc_lambda"}, allow_val_change=True)
+        "initial_ewc_penalty": initial_penalty, "tuned_parameter": "ewc_lambda",
+        "replication_factor": "random_seed",
+        "source_stage1_random_seed": anchor["source_stage1_config"]["random_seed"]}, allow_val_change=True)
     base1 = evaluate(model, loaders["stage1_holdout"], loss_fn, device)
     base2 = evaluate(model, loaders["stage2_holdout"], loss_fn, device)
     initial = {"epoch": 0, **prefixed("stage1_holdout", base1), **prefixed("stage2_holdout", base2)}
@@ -198,7 +203,8 @@ def main():
                   "learning_rate", "best", "timing"):
         run.define_metric(f"{group}/*", step_metric="epoch")
     run.log(initial); write_csv(out / "initial_metrics.csv", {k: v for k, v in initial.items() if k != "epoch"})
-    print(f"Results: {out}\nDevice: {device} | lambda={c['ewc_lambda']:g} | only lambda varies")
+    print(f"Results: {out}\nDevice: {device} | lambda={c['ewc_lambda']:g} | seed={c['random_seed']} | "
+          "lambda is tuned; seed is a replication factor")
     print(f"Stage 1 settings | LR={c['backbone_learning_rate']:.3g} x {c['classifier_lr_multiplier']:g} | "
           f"FL weight={c['fl_class_weight']:.4f} | decay={c['weight_decay']:.4f} | batch={c['batch_size']}")
     print(f"Epoch 0 | Stage 1 CSS={base1['css']:.4f} | Stage 2 CSS={base2['css']:.4f}")
