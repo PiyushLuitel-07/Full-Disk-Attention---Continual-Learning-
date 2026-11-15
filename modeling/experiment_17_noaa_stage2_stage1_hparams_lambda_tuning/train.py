@@ -1,5 +1,5 @@
 """Train Stage 2 with the selected Stage 1 settings; vary only EWC lambda."""
-import argparse, csv, json, math, random, sys, time
+import argparse, csv, json, math, os, random, sys, time
 from datetime import datetime
 from pathlib import Path
 import torch, wandb
@@ -154,9 +154,10 @@ def resolve_config(run, anchor, cli_lambda):
 
 def main():
     a = arguments(); stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = RESULTS_DIR / f"mobilenet_stage2_lambda_{stamp}"; out.mkdir(parents=True, exist_ok=False)
+    run_label = f"{stamp}_{os.getpid()}"
+    out = RESULTS_DIR / f"mobilenet_stage2_lambda_{run_label}"; out.mkdir(parents=True, exist_ok=False)
     run = wandb.init(entity=WANDB_ENTITY, project=WANDB_PROJECT, config={"ewc_lambda": CONFIG["ewc_lambda"]},
-        dir=str(out), name=a.run_name or f"noaa_stage2_experiment_17_lambda_{stamp}", tags=WANDB_TAGS,
+        dir=str(out), name=a.run_name or f"noaa_stage2_experiment_17_lambda_{run_label}", tags=WANDB_TAGS,
         job_type="stage2-ewc-lambda-ablation")
     if not a.anchor.is_file(): raise FileNotFoundError(f"Missing EWC anchor: {a.anchor}")
     anchor = torch.load(a.anchor, map_location="cpu", weights_only=False)
