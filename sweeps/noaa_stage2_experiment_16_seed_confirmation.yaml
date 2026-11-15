@@ -1,0 +1,21 @@
+name: noaa_stage2_experiment_16_seed_confirmation
+program: modeling/experiment_16_noaa_stage2_seed_confirmation/train.py
+method: grid
+
+# These three candidates were fixed before viewing Experiment 16 test results.
+# Test metrics must be reported for every run and must not trigger more tuning.
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  candidate_id:
+    values: ["014029", "014124", "070421"]
+  random_seed:
+    values: [42, 123, 2026]
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+
