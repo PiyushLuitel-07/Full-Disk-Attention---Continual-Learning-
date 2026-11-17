@@ -45,6 +45,12 @@ def parse_args():
         default=CONFIG["mature_holdout_tolerance"],
     )
     parser.add_argument("--random-seed", type=int, default=CONFIG["random_seed"])
+    parser.add_argument(
+        "--fl-class-weight",
+        type=float,
+        default=None,
+        help="Override the default exact inverse-frequency FL weight.",
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
@@ -160,6 +166,27 @@ def write_rows(path, rows):
         writer.writerows(rows)
 
 
+def log_learning_curves(run, rows):
+    """Create W&B charts with final-model train metrics versus holdout metrics."""
+    epochs = [row["epoch"] for row in rows]
+    metrics = (
+        "css", "tss", "hss", "loss", "precision", "recall", "f1",
+        "false_positive_rate", "false_negative_rate",
+    )
+    for metric in metrics:
+        chart = wandb.plot.line_series(
+            xs=epochs,
+            ys=[
+                [row[f"train_eval_{metric}"] for row in rows],
+                [row[f"holdout_{metric}"] for row in rows],
+            ],
+            keys=["Training (end-of-epoch evaluation)", "Holdout"],
+            title=f"Training and holdout {metric.upper()} across epochs",
+            xname="Epoch",
+        )
+        run.log({f"learning_curves/{metric}": chart})
+
+
 def load_metrics(model, checkpoint_path, loader, criterion, device):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -195,8 +222,20 @@ def main():
 
     counts = class_counts(train_loader)
     nf_count, fl_count = int(counts[0]), int(counts[1])
+    exact_fl_weight = nf_count / fl_count
     config["nf_class_weight"] = 1.0
-    config["fl_class_weight"] = nf_count / fl_count
+    config["fl_class_weight"] = (
+        args.fl_class_weight
+        if args.fl_class_weight is not None
+        else exact_fl_weight
+    )
+    if config["fl_class_weight"] <= 0:
+        raise ValueError("fl_class_weight must be positive")
+    config["class_weighting"] = (
+        "manual_fl_weight_override" if args.fl_class_weight is not None
+        else "exact_inverse_frequency_ratio"
+    )
+    config["exact_inverse_frequency_fl_weight"] = exact_fl_weight
     config["classifier_learning_rate"] = (
         config["backbone_learning_rate"] * config["classifier_lr_multiplier"]
     )
@@ -304,6 +343,7 @@ def main():
     eligible = [item for item in pareto if item["holdout_css"] >= cutoff]
     selected = max(eligible, key=lambda item: (item["train_css"], item["holdout_css"]))
     shutil.copy2(selected["path"], mature_path)
+    log_learning_curves(run, rows)
 
     best_holdout_metrics = load_metrics(model, best_path, holdout_loader, criterion, device)
     best_validation = load_metrics(model, best_path, validation_loader, criterion, device)
