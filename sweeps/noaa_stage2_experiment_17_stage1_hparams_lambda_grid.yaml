@@ -1,21 +1,13 @@
 name: noaa_stage2_experiment_17_stage1_hparams_lambda_grid
 program: modeling/experiment_17_noaa_stage2_stage1_hparams_lambda_tuning/train.py
 method: grid
-
-# Within each run, Stage 2 holdout CSS selects the checkpoint. The later
-# validation period compares lambdas. The test period is intentionally unused.
+ 
 metric:
   name: validation/css
   goal: maximize
-
-# This is a controlled lambda ablation with three independent Stage 2 seeds.
-# Every non-seed setting is loaded from the selected Stage 1 checkpoint.
 parameters:
   ewc_lambda:
-    # 0 is the no-EWC control. The high-lambda region is deliberately dense:
-    # the earlier balanced Stage 2 candidate was near lambda=3788.
     values: [0, 0.01, 0.1, 1, 5, 10, 25, 50, 100, 250, 500, 750, 1000, 1500, 2000, 2250, 2500, 2750, 3000, 3500, 4000, 4500, 5000]
-  # Replication factor only: three independent Stage 2 minibatch orders.
   random_seed:
     values: [42, 123, 2026]
 
