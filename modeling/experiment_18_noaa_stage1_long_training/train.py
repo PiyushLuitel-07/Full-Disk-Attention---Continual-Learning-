@@ -46,6 +46,11 @@ def parse_args():
     )
     parser.add_argument("--random-seed", type=int, default=CONFIG["random_seed"])
     parser.add_argument(
+        "--scheduler-patience",
+        type=int,
+        default=CONFIG["scheduler_patience"],
+    )
+    parser.add_argument(
         "--fl-class-weight",
         type=float,
         default=None,
@@ -200,11 +205,14 @@ def main():
         epochs=args.epochs,
         mature_holdout_tolerance=args.mature_holdout_tolerance,
         random_seed=args.random_seed,
+        scheduler_patience=args.scheduler_patience,
     )
     if config["epochs"] != 100:
         print(f"Warning: requested {config['epochs']} epochs; the planned experiment uses 100.")
     if not 0 <= config["mature_holdout_tolerance"] <= 1:
         raise ValueError("mature_holdout_tolerance must be between 0 and 1")
+    if config["scheduler_patience"] < 0:
+        raise ValueError("scheduler_patience must be non-negative")
 
     set_seed(config["random_seed"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -288,6 +296,11 @@ def main():
     print(f"Training data: NF={nf_count:,} | FL={fl_count:,} | total={nf_count + fl_count:,}")
     print(f"Loss weights: NF=1.0000 | FL={config['fl_class_weight']:.6f}")
     print(f"Training: fixed {config['epochs']} epochs | early stopping disabled")
+    print(
+        "Scheduler: ReduceLROnPlateau | "
+        f"patience={config['scheduler_patience']} | "
+        f"factor={config['scheduler_factor']:.2f}"
+    )
     print(f"Mature-selection holdout tolerance: {config['mature_holdout_tolerance']:.4f}")
 
     for epoch in range(1, config["epochs"] + 1):

@@ -25,7 +25,9 @@ CONFIG = {
     "weight_decay": 0.05328805613626618,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
-    "scheduler_patience": 5,
+    # Hold each useful learning rate longer so 100-epoch training can continue
+    # learning instead of reaching the minimum rate near epoch 32.
+    "scheduler_patience": 15,
     "scheduler_factor": 0.3,
     "mature_holdout_tolerance": 0.02,
     "num_workers": 8,
