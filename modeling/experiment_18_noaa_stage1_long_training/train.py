@@ -56,6 +56,12 @@ def parse_args():
         default=None,
         help="Override the default exact inverse-frequency FL weight.",
     )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=CONFIG["weight_decay"],
+        help="AdamW weight decay applied to weight tensors (bias/norm excluded).",
+    )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
@@ -206,6 +212,7 @@ def main():
         mature_holdout_tolerance=args.mature_holdout_tolerance,
         random_seed=args.random_seed,
         scheduler_patience=args.scheduler_patience,
+        weight_decay=args.weight_decay,
     )
     if config["epochs"] != 100:
         print(f"Warning: requested {config['epochs']} epochs; the planned experiment uses 100.")
@@ -213,6 +220,8 @@ def main():
         raise ValueError("mature_holdout_tolerance must be between 0 and 1")
     if config["scheduler_patience"] < 0:
         raise ValueError("scheduler_patience must be non-negative")
+    if config["weight_decay"] < 0:
+        raise ValueError("weight_decay must be non-negative")
 
     set_seed(config["random_seed"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -295,13 +304,13 @@ def main():
     print(f"Results: {run_dir}")
     print(f"Training data: NF={nf_count:,} | FL={fl_count:,} | total={nf_count + fl_count:,}")
     print(f"Loss weights: NF=1.0000 | FL={config['fl_class_weight']:.6f}")
+    print(f"AdamW weight decay: {config['weight_decay']:.6f}")
     print(f"Training: fixed {config['epochs']} epochs | early stopping disabled")
     print(
         "Scheduler: ReduceLROnPlateau | "
         f"patience={config['scheduler_patience']} | "
         f"factor={config['scheduler_factor']:.2f}"
     )
-    print(f"Mature-selection holdout tolerance: {config['mature_holdout_tolerance']:.4f}")
 
     for epoch in range(1, config["epochs"] + 1):
         started = time.perf_counter()
@@ -328,7 +337,6 @@ def main():
             "learning_rate/classifier": optimizer.param_groups[2]["lr"],
             "selection/best_holdout_css": best_holdout,
             "selection/best_holdout_epoch": best_epoch,
-            "selection/pareto_candidate_count": len(pareto),
             "timing/epoch_seconds": elapsed,
             **{f"train_online/{key}": value for key, value in train_online.items()},
             **{f"train_eval/{key}": value for key, value in train_eval.items()},
@@ -340,16 +348,31 @@ def main():
 
         print(f"Epoch {epoch:03d}/{config['epochs']}")
         print(
-            f"  Train(eval) | CSS={train_eval['css']:.4f} | "
-            f"TSS={train_eval['tss']:.4f} | HSS={train_eval['hss']:.4f}"
+            f"  Train(eval) | loss={train_eval['loss']:.4f} | "
+            f"CSS={train_eval['css']:.4f} | TSS={train_eval['tss']:.4f} | "
+            f"HSS={train_eval['hss']:.4f}"
         )
         print(
-            f"  Holdout     | CSS={holdout['css']:.4f} | "
+            f"              | recall={train_eval['recall']:.4f} | "
+            f"precision={train_eval['precision']:.4f} | F1={train_eval['f1']:.4f} | "
+            f"FPR={train_eval['false_positive_rate']:.4f} | "
+            f"FNR={train_eval['false_negative_rate']:.4f}"
+        )
+        print(
+            f"  Holdout     | loss={holdout['loss']:.4f} | CSS={holdout['css']:.4f} | "
             f"TSS={holdout['tss']:.4f} | HSS={holdout['hss']:.4f}"
         )
         print(
+            f"              | recall={holdout['recall']:.4f} | "
+            f"precision={holdout['precision']:.4f} | F1={holdout['f1']:.4f} | "
+            f"FPR={holdout['false_positive_rate']:.4f} | "
+            f"FNR={holdout['false_negative_rate']:.4f}"
+        )
+        print(
             f"  Progress    | best={best_holdout:.4f} at epoch {best_epoch} | "
-            f"Pareto={len(pareto)} | time={elapsed:.1f}s"
+            f"gap={train_eval['css'] - holdout['css']:+.4f} | "
+            f"backbone LR={optimizer.param_groups[0]['lr']:.2e} | "
+            f"classifier LR={optimizer.param_groups[2]['lr']:.2e} | time={elapsed:.1f}s"
         )
 
     cutoff = best_holdout - config["mature_holdout_tolerance"]
@@ -391,6 +414,24 @@ def main():
         f"Selected mature: epoch {selected['epoch']}, "
         f"train CSS={selected['train_css']:.4f}, "
         f"holdout CSS={selected['holdout_css']:.4f} (cutoff={cutoff:.4f})"
+    )
+    print(
+        "Strict-best validation | "
+        f"loss={best_validation['loss']:.4f} | CSS={best_validation['css']:.4f} | "
+        f"TSS={best_validation['tss']:.4f} | HSS={best_validation['hss']:.4f} | "
+        f"recall={best_validation['recall']:.4f} | "
+        f"precision={best_validation['precision']:.4f} | "
+        f"F1={best_validation['f1']:.4f} | "
+        f"FPR={best_validation['false_positive_rate']:.4f}"
+    )
+    print(
+        "Mature validation      | "
+        f"loss={mature_validation['loss']:.4f} | CSS={mature_validation['css']:.4f} | "
+        f"TSS={mature_validation['tss']:.4f} | HSS={mature_validation['hss']:.4f} | "
+        f"recall={mature_validation['recall']:.4f} | "
+        f"precision={mature_validation['precision']:.4f} | "
+        f"F1={mature_validation['f1']:.4f} | "
+        f"FPR={mature_validation['false_positive_rate']:.4f}"
     )
     print(f"Strict checkpoint: {best_path}")
     print(f"Mature checkpoint: {mature_path}")
