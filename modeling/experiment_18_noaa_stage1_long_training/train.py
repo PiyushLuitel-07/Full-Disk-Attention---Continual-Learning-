@@ -70,6 +70,25 @@ def parse_args():
         help="Dropout probability between the two classifier linear layers.",
     )
     parser.add_argument(
+        "--augmentation",
+        choices=(
+            "none",
+            "rotation5",
+            "rotation5_fl_copy",
+            "rotation5_hflip_fl_copy",
+            "rotation5_and_hflip_fl_copies",
+        ),
+        default="none",
+        help=(
+            "Training-only augmentation; rotation5 applies a -5 to +5 degree "
+            "rotation to each training sample with probability 0.5; "
+            "rotation5_fl_copy appends one rotated copy of every FL sample; "
+            "rotation5_hflip_fl_copy additionally flips each appended copy "
+            "horizontally with probability 0.5; rotation5_and_hflip_fl_copies "
+            "appends two FL copies: one rotation-only and one flip-only."
+        ),
+    )
+    parser.add_argument(
         "--lr-restart-epoch",
         type=int,
         default=0,
@@ -270,6 +289,7 @@ def main():
         scheduler_patience=args.scheduler_patience,
         weight_decay=args.weight_decay,
         dropout=args.dropout,
+        augmentation=args.augmentation,
         lr_restart_epoch=args.lr_restart_epoch,
         lr_restart_scale=args.lr_restart_scale,
     )
@@ -299,7 +319,14 @@ def main():
     candidate_dir.mkdir(parents=True, exist_ok=False)
 
     batch_size, workers = config["batch_size"], config["num_workers"]
-    train_loader = build_loader(TRAIN_CSV, IMAGE_DIR, batch_size, workers, shuffle=True)
+    train_loader = build_loader(
+        TRAIN_CSV,
+        IMAGE_DIR,
+        batch_size,
+        workers,
+        shuffle=True,
+        augmentation=config["augmentation"],
+    )
     train_eval_loader = build_loader(TRAIN_CSV, IMAGE_DIR, batch_size, workers)
     holdout_loader = build_loader(HOLDOUT_CSV, IMAGE_DIR, batch_size, workers)
     validation_loader = build_loader(VALIDATION_CSV, IMAGE_DIR, batch_size, workers)
@@ -364,6 +391,7 @@ def main():
     print(f"Loss weights: NF=1.0000 | FL={config['fl_class_weight']:.6f}")
     print(f"AdamW weight decay: {config['weight_decay']:.6f}")
     print(f"Classifier dropout: {config['dropout']:.3f}")
+    print(f"Training augmentation: {config['augmentation']}")
     print(f"Training: fixed {config['epochs']} epochs | early stopping disabled")
     print(
         "Scheduler: ReduceLROnPlateau | "
