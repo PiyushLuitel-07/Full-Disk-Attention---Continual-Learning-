@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import json
 import random
 import shutil
 import sys
@@ -61,6 +62,24 @@ def parse_args():
         type=float,
         default=CONFIG["weight_decay"],
         help="AdamW weight decay applied to weight tensors (bias/norm excluded).",
+    )
+    parser.add_argument(
+        "--lr-restart-epoch",
+        type=int,
+        default=0,
+        help=(
+            "Reset the learning rates and ReduceLROnPlateau state at the start of this "
+            "epoch. Use 0 to disable (the default)."
+        ),
+    )
+    parser.add_argument(
+        "--lr-restart-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Multiplier on the initial backbone and classifier learning rates used at "
+            "the optional restart."
+        ),
     )
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
@@ -128,6 +147,37 @@ def build_optimizer(model, config):
         for decay in (1, 0)
     ]
     return AdamW(parameters), classifier_lr
+
+
+def build_scheduler(optimizer, config):
+    """Create a fresh plateau scheduler, including after an optional LR restart."""
+    return ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=config["scheduler_factor"],
+        patience=config["scheduler_patience"],
+        threshold=0.001,
+        threshold_mode="abs",
+        min_lr=[
+            config["min_backbone_learning_rate"],
+            config["min_backbone_learning_rate"],
+            config["min_classifier_learning_rate"],
+            config["min_classifier_learning_rate"],
+        ],
+    )
+
+
+def restart_learning_rates(optimizer, config):
+    """Restore group LRs to a specified fraction of their initial values."""
+    backbone_lr = config["backbone_learning_rate"] * config["lr_restart_scale"]
+    classifier_lr = (
+        config["backbone_learning_rate"]
+        * config["classifier_lr_multiplier"]
+        * config["lr_restart_scale"]
+    )
+    for group_index, group in enumerate(optimizer.param_groups):
+        group["lr"] = backbone_lr if group_index < 2 else classifier_lr
+    return backbone_lr, classifier_lr
 
 
 def checkpoint_payload(model, epoch, train_metrics, holdout_metrics, config):
@@ -213,6 +263,8 @@ def main():
         random_seed=args.random_seed,
         scheduler_patience=args.scheduler_patience,
         weight_decay=args.weight_decay,
+        lr_restart_epoch=args.lr_restart_epoch,
+        lr_restart_scale=args.lr_restart_scale,
     )
     if config["epochs"] != 100:
         print(f"Warning: requested {config['epochs']} epochs; the planned experiment uses 100.")
@@ -222,6 +274,12 @@ def main():
         raise ValueError("scheduler_patience must be non-negative")
     if config["weight_decay"] < 0:
         raise ValueError("weight_decay must be non-negative")
+    if not 0 <= config["lr_restart_epoch"] <= config["epochs"]:
+        raise ValueError("lr_restart_epoch must be between 0 and epochs")
+    if config["lr_restart_epoch"] == 1:
+        raise ValueError("lr_restart_epoch must be 0 or at least 2")
+    if config["lr_restart_scale"] <= 0:
+        raise ValueError("lr_restart_scale must be positive")
 
     set_seed(config["random_seed"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -256,8 +314,12 @@ def main():
     config["classifier_learning_rate"] = (
         config["backbone_learning_rate"] * config["classifier_lr_multiplier"]
     )
+    config["run_name"] = run_name
     config["checkpoint_selection"] = "highest_train_css_within_best_holdout_minus_tolerance"
     config["early_stopping"] = False
+    with (run_dir / "resolved_config.json").open("w", encoding="utf-8") as file:
+        json.dump(config, file, indent=2, sort_keys=True)
+        file.write("\n")
 
     criterion = nn.CrossEntropyLoss(
         weight=torch.tensor([1.0, config["fl_class_weight"]], device=device)
@@ -268,20 +330,7 @@ def main():
         dropout=config["dropout"],
     ).to(device)
     optimizer, classifier_lr = build_optimizer(model, config)
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="max",
-        factor=config["scheduler_factor"],
-        patience=config["scheduler_patience"],
-        threshold=0.001,
-        threshold_mode="abs",
-        min_lr=[
-            config["min_backbone_learning_rate"],
-            config["min_backbone_learning_rate"],
-            config["min_classifier_learning_rate"],
-            config["min_classifier_learning_rate"],
-        ],
-    )
+    scheduler = build_scheduler(optimizer, config)
 
     run = wandb.init(
         entity=WANDB_ENTITY,
@@ -311,8 +360,22 @@ def main():
         f"patience={config['scheduler_patience']} | "
         f"factor={config['scheduler_factor']:.2f}"
     )
+    if config["lr_restart_epoch"]:
+        print(
+            "LR restart: start of epoch "
+            f"{config['lr_restart_epoch']} | scale={config['lr_restart_scale']:.3f}"
+        )
 
     for epoch in range(1, config["epochs"] + 1):
+        restart_applied = epoch == config["lr_restart_epoch"]
+        if restart_applied:
+            restart_backbone_lr, restart_classifier_lr = restart_learning_rates(optimizer, config)
+            scheduler = build_scheduler(optimizer, config)
+            print(
+                f"Restarted learning rates at epoch {epoch}: "
+                f"backbone={restart_backbone_lr:.2e} | "
+                f"classifier={restart_classifier_lr:.2e}"
+            )
         started = time.perf_counter()
         train_online = run_epoch(model, train_loader, criterion, device, optimizer)
         # This is the stable train CSS attached to the saved end-of-epoch model.
@@ -337,6 +400,7 @@ def main():
             "learning_rate/classifier": optimizer.param_groups[2]["lr"],
             "selection/best_holdout_css": best_holdout,
             "selection/best_holdout_epoch": best_epoch,
+            "schedule/restart_applied": int(restart_applied),
             "timing/epoch_seconds": elapsed,
             **{f"train_online/{key}": value for key, value in train_online.items()},
             **{f"train_eval/{key}": value for key, value in train_eval.items()},
