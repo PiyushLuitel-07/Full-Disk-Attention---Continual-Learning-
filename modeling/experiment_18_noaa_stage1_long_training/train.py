@@ -64,6 +64,12 @@ def parse_args():
         help="AdamW weight decay applied to weight tensors (bias/norm excluded).",
     )
     parser.add_argument(
+        "--dropout",
+        type=float,
+        default=CONFIG["dropout"],
+        help="Dropout probability between the two classifier linear layers.",
+    )
+    parser.add_argument(
         "--lr-restart-epoch",
         type=int,
         default=0,
@@ -263,6 +269,7 @@ def main():
         random_seed=args.random_seed,
         scheduler_patience=args.scheduler_patience,
         weight_decay=args.weight_decay,
+        dropout=args.dropout,
         lr_restart_epoch=args.lr_restart_epoch,
         lr_restart_scale=args.lr_restart_scale,
     )
@@ -274,6 +281,8 @@ def main():
         raise ValueError("scheduler_patience must be non-negative")
     if config["weight_decay"] < 0:
         raise ValueError("weight_decay must be non-negative")
+    if not 0 <= config["dropout"] < 1:
+        raise ValueError("dropout must be in the interval [0, 1)")
     if not 0 <= config["lr_restart_epoch"] <= config["epochs"]:
         raise ValueError("lr_restart_epoch must be between 0 and epochs")
     if config["lr_restart_epoch"] == 1:
@@ -354,6 +363,7 @@ def main():
     print(f"Training data: NF={nf_count:,} | FL={fl_count:,} | total={nf_count + fl_count:,}")
     print(f"Loss weights: NF=1.0000 | FL={config['fl_class_weight']:.6f}")
     print(f"AdamW weight decay: {config['weight_decay']:.6f}")
+    print(f"Classifier dropout: {config['dropout']:.3f}")
     print(f"Training: fixed {config['epochs']} epochs | early stopping disabled")
     print(
         "Scheduler: ReduceLROnPlateau | "
