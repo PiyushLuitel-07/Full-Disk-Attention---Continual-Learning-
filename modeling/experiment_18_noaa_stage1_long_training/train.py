@@ -41,6 +41,21 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=CONFIG["epochs"])
     parser.add_argument(
+        "--backbone-learning-rate",
+        type=float,
+        default=CONFIG["backbone_learning_rate"],
+        help=(
+            "Backbone peak LR for OneCycleLR, or initial LR for "
+            "ReduceLROnPlateau."
+        ),
+    )
+    parser.add_argument(
+        "--classifier-lr-multiplier",
+        type=float,
+        default=CONFIG["classifier_lr_multiplier"],
+        help="Classifier LR divided by backbone LR; must be positive.",
+    )
+    parser.add_argument(
         "--scheduler",
         choices=("onecycle", "plateau"),
         default=CONFIG["scheduler"],
@@ -323,6 +338,8 @@ def main():
     config = dict(CONFIG)
     config.update(
         epochs=args.epochs,
+        backbone_learning_rate=args.backbone_learning_rate,
+        classifier_lr_multiplier=args.classifier_lr_multiplier,
         scheduler=args.scheduler,
         mature_holdout_tolerance=args.mature_holdout_tolerance,
         random_seed=args.random_seed,
@@ -342,6 +359,10 @@ def main():
         raise ValueError("mature_holdout_tolerance must be between 0 and 1")
     if config["scheduler_patience"] < 0:
         raise ValueError("scheduler_patience must be non-negative")
+    if config["backbone_learning_rate"] <= 0:
+        raise ValueError("backbone_learning_rate must be positive")
+    if config["classifier_lr_multiplier"] <= 0:
+        raise ValueError("classifier_lr_multiplier must be positive")
     if config["weight_decay"] < 0:
         raise ValueError("weight_decay must be non-negative")
     if not 0 <= config["dropout"] < 1:
