@@ -14,7 +14,7 @@ import torch
 import wandb
 from torch import nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 
 
 HERE = Path(__file__).resolve().parent
@@ -40,6 +40,12 @@ from model import build_model  # noqa: E402
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=CONFIG["epochs"])
+    parser.add_argument(
+        "--scheduler",
+        choices=("onecycle", "plateau"),
+        default=CONFIG["scheduler"],
+        help="OneCycleLR updates every batch; plateau updates after each holdout evaluation.",
+    )
     parser.add_argument(
         "--mature-holdout-tolerance",
         type=float,
@@ -144,7 +150,7 @@ def add_rates(metrics):
     return metrics
 
 
-def run_epoch(model, loader, criterion, device, optimizer=None):
+def run_epoch(model, loader, criterion, device, optimizer=None, batch_scheduler=None):
     training = optimizer is not None
     model.train(training)
     predictions, targets, loss_sum, count = [], [], 0.0, 0
@@ -160,6 +166,8 @@ def run_epoch(model, loader, criterion, device, optimizer=None):
             if training:
                 loss.backward()
                 optimizer.step()
+                if batch_scheduler is not None:
+                    batch_scheduler.step()
             count += labels.numel()
             loss_sum += loss.item() * labels.numel()
             predictions.extend(logits.argmax(1).detach().cpu().tolist())
@@ -192,8 +200,21 @@ def build_optimizer(model, config):
     return AdamW(parameters), classifier_lr
 
 
-def build_scheduler(optimizer, config):
-    """Create a fresh plateau scheduler, including after an optional LR restart."""
+def build_scheduler(optimizer, config, steps_per_epoch):
+    """Create the requested batch-wise or epoch-wise learning-rate schedule."""
+    if config["scheduler"] == "onecycle":
+        backbone_max = config["backbone_learning_rate"]
+        classifier_max = backbone_max * config["classifier_lr_multiplier"]
+        return OneCycleLR(
+            optimizer,
+            max_lr=[backbone_max, backbone_max, classifier_max, classifier_max],
+            epochs=config["epochs"],
+            steps_per_epoch=steps_per_epoch,
+            pct_start=config["onecycle_pct_start"],
+            anneal_strategy="cos",
+            div_factor=config["onecycle_div_factor"],
+            final_div_factor=config["onecycle_final_div_factor"],
+        )
     return ReduceLROnPlateau(
         optimizer,
         mode="max",
@@ -302,6 +323,7 @@ def main():
     config = dict(CONFIG)
     config.update(
         epochs=args.epochs,
+        scheduler=args.scheduler,
         mature_holdout_tolerance=args.mature_holdout_tolerance,
         random_seed=args.random_seed,
         scheduler_patience=args.scheduler_patience,
@@ -332,6 +354,8 @@ def main():
         raise ValueError("lr_restart_epoch must be 0 or at least 2")
     if config["lr_restart_scale"] <= 0:
         raise ValueError("lr_restart_scale must be positive")
+    if config["scheduler"] == "onecycle" and config["lr_restart_epoch"]:
+        raise ValueError("lr_restart_epoch is incompatible with OneCycleLR")
 
     set_seed(config["random_seed"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -401,7 +425,7 @@ def main():
         dropout=config["dropout"],
     ).to(device)
     optimizer, classifier_lr = build_optimizer(model, config)
-    scheduler = build_scheduler(optimizer, config)
+    scheduler = build_scheduler(optimizer, config, len(train_loader))
 
     run = wandb.init(
         entity=WANDB_ENTITY,
@@ -432,11 +456,19 @@ def main():
     print(f"Classifier dropout: {config['dropout']:.3f}")
     print(f"Training augmentation: {config['augmentation']}")
     print(f"Training: fixed {config['epochs']} epochs | early stopping disabled")
-    print(
-        "Scheduler: ReduceLROnPlateau | "
-        f"patience={config['scheduler_patience']} | "
-        f"factor={config['scheduler_factor']:.2f}"
-    )
+    if config["scheduler"] == "onecycle":
+        print(
+            "Scheduler: OneCycleLR (per batch) | "
+            f"warmup={config['onecycle_pct_start']:.0%} | "
+            f"backbone peak={config['backbone_learning_rate']:.2e} | "
+            f"classifier peak={classifier_lr:.2e}"
+        )
+    else:
+        print(
+            "Scheduler: ReduceLROnPlateau | "
+            f"patience={config['scheduler_patience']} | "
+            f"factor={config['scheduler_factor']:.2f}"
+        )
     if config["lr_restart_epoch"]:
         print(
             "LR restart: start of epoch "
@@ -447,18 +479,26 @@ def main():
         restart_applied = epoch == config["lr_restart_epoch"]
         if restart_applied:
             restart_backbone_lr, restart_classifier_lr = restart_learning_rates(optimizer, config)
-            scheduler = build_scheduler(optimizer, config)
+            scheduler = build_scheduler(optimizer, config, len(train_loader))
             print(
                 f"Restarted learning rates at epoch {epoch}: "
                 f"backbone={restart_backbone_lr:.2e} | "
                 f"classifier={restart_classifier_lr:.2e}"
             )
         started = time.perf_counter()
-        train_online = run_epoch(model, train_loader, criterion, device, optimizer)
+        train_online = run_epoch(
+            model,
+            train_loader,
+            criterion,
+            device,
+            optimizer,
+            batch_scheduler=scheduler if config["scheduler"] == "onecycle" else None,
+        )
         # This is the stable train CSS attached to the saved end-of-epoch model.
         train_eval = run_epoch(model, train_eval_loader, criterion, device)
         holdout = run_epoch(model, holdout_loader, criterion, device)
-        scheduler.step(holdout["css"])
+        if config["scheduler"] == "plateau":
+            scheduler.step(holdout["css"])
 
         payload = checkpoint_payload(model, epoch, train_eval, holdout, config)
         if holdout["css"] > best_holdout:

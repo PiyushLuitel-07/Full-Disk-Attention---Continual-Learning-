@@ -25,10 +25,15 @@ CONFIG = {
     "weight_decay": 0.05328805613626618,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
-    # Hold each useful learning rate longer so 100-epoch training can continue
-    # learning instead of reaching the minimum rate near epoch 32.
-    "scheduler_patience": 15,
+    "scheduler": "onecycle",
+    # Used only by the ReduceLROnPlateau control run.
+    "scheduler_patience": 5,
     "scheduler_factor": 0.3,
+    # OneCycleLR warms up for the first 10% of optimizer steps and then
+    # anneals for the remaining 90%. Configured LRs are treated as peak LRs.
+    "onecycle_pct_start": 0.10,
+    "onecycle_div_factor": 10.0,
+    "onecycle_final_div_factor": 1000.0,
     "mature_holdout_tolerance": 0.02,
     "num_workers": 8,
     "random_seed": 123,
