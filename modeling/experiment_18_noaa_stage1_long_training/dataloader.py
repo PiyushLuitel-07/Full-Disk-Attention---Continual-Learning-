@@ -15,11 +15,26 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 class MagnetogramDataset(Dataset):
-    def __init__(self, csv_file, image_directory, augmentation="none"):
+    def __init__(
+        self,
+        csv_file,
+        image_directory,
+        augmentation="none",
+        normalization="shared_grayscale",
+        grayscale_mean=0.5,
+        grayscale_std=0.5,
+    ):
         rows = pd.read_csv(csv_file)
         self.paths = [Path(image_directory) / value for value in rows["label"]]
         self.targets = rows["goes_class"].astype(int).tolist()
         self.augmentation = augmentation
+        self.normalization = normalization
+        self.grayscale_mean = float(grayscale_mean)
+        self.grayscale_std = float(grayscale_std)
+        if normalization not in {"shared_grayscale", "imagenet_rgb"}:
+            raise ValueError(f"Unknown normalization: {normalization}")
+        if self.grayscale_std <= 0:
+            raise ValueError("grayscale_std must be positive")
         self.augment_types = ["none"] * len(self.paths)
 
         # Preserve every original and append one dynamically rotated copy of
@@ -77,8 +92,18 @@ class MagnetogramDataset(Dataset):
                 or (augment_type == "rotation_hflip_random" and torch.rand(()) < 0.5)
             ):
                 image = TF.hflip(image)
-            tensor = TF.to_tensor(image).repeat(3, 1, 1)
-        tensor = TF.normalize(tensor, IMAGENET_MEAN, IMAGENET_STD)
+            tensor = TF.to_tensor(image)
+        if self.normalization == "shared_grayscale":
+            # Normalize the physical channel once. Repeating afterward keeps
+            # R/G/B exactly identical instead of creating artificial color.
+            tensor = TF.normalize(
+                tensor,
+                (self.grayscale_mean,),
+                (self.grayscale_std,),
+            ).repeat(3, 1, 1)
+        else:
+            # Retained as the legacy/pretrained-transfer control.
+            tensor = TF.normalize(tensor.repeat(3, 1, 1), IMAGENET_MEAN, IMAGENET_STD)
         return tensor, torch.tensor(self.targets[index], dtype=torch.long)
 
 
@@ -89,8 +114,18 @@ def build_loader(
     num_workers,
     shuffle=False,
     augmentation="none",
+    normalization="shared_grayscale",
+    grayscale_mean=0.5,
+    grayscale_std=0.5,
 ):
-    dataset = MagnetogramDataset(csv_file, image_directory, augmentation=augmentation)
+    dataset = MagnetogramDataset(
+        csv_file,
+        image_directory,
+        augmentation=augmentation,
+        normalization=normalization,
+        grayscale_mean=grayscale_mean,
+        grayscale_std=grayscale_std,
+    )
     options = dict(
         dataset=dataset,
         batch_size=batch_size,

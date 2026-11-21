@@ -89,6 +89,24 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--normalization",
+        choices=("shared_grayscale", "imagenet_rgb"),
+        default=CONFIG["normalization"],
+        help="Use one shared grayscale transform or legacy per-channel ImageNet normalization.",
+    )
+    parser.add_argument(
+        "--grayscale-mean",
+        type=float,
+        default=CONFIG["grayscale_mean"],
+        help="Scalar mean used by shared_grayscale normalization.",
+    )
+    parser.add_argument(
+        "--grayscale-std",
+        type=float,
+        default=CONFIG["grayscale_std"],
+        help="Positive scalar standard deviation used by shared_grayscale normalization.",
+    )
+    parser.add_argument(
         "--lr-restart-epoch",
         type=int,
         default=0,
@@ -290,6 +308,9 @@ def main():
         weight_decay=args.weight_decay,
         dropout=args.dropout,
         augmentation=args.augmentation,
+        normalization=args.normalization,
+        grayscale_mean=args.grayscale_mean,
+        grayscale_std=args.grayscale_std,
         lr_restart_epoch=args.lr_restart_epoch,
         lr_restart_scale=args.lr_restart_scale,
     )
@@ -303,6 +324,8 @@ def main():
         raise ValueError("weight_decay must be non-negative")
     if not 0 <= config["dropout"] < 1:
         raise ValueError("dropout must be in the interval [0, 1)")
+    if config["grayscale_std"] <= 0:
+        raise ValueError("grayscale_std must be positive")
     if not 0 <= config["lr_restart_epoch"] <= config["epochs"]:
         raise ValueError("lr_restart_epoch must be between 0 and epochs")
     if config["lr_restart_epoch"] == 1:
@@ -319,6 +342,11 @@ def main():
     candidate_dir.mkdir(parents=True, exist_ok=False)
 
     batch_size, workers = config["batch_size"], config["num_workers"]
+    loader_normalization = dict(
+        normalization=config["normalization"],
+        grayscale_mean=config["grayscale_mean"],
+        grayscale_std=config["grayscale_std"],
+    )
     train_loader = build_loader(
         TRAIN_CSV,
         IMAGE_DIR,
@@ -326,10 +354,17 @@ def main():
         workers,
         shuffle=True,
         augmentation=config["augmentation"],
+        **loader_normalization,
     )
-    train_eval_loader = build_loader(TRAIN_CSV, IMAGE_DIR, batch_size, workers)
-    holdout_loader = build_loader(HOLDOUT_CSV, IMAGE_DIR, batch_size, workers)
-    validation_loader = build_loader(VALIDATION_CSV, IMAGE_DIR, batch_size, workers)
+    train_eval_loader = build_loader(
+        TRAIN_CSV, IMAGE_DIR, batch_size, workers, **loader_normalization
+    )
+    holdout_loader = build_loader(
+        HOLDOUT_CSV, IMAGE_DIR, batch_size, workers, **loader_normalization
+    )
+    validation_loader = build_loader(
+        VALIDATION_CSV, IMAGE_DIR, batch_size, workers, **loader_normalization
+    )
 
     counts = class_counts(train_loader)
     nf_count, fl_count = int(counts[0]), int(counts[1])
@@ -388,6 +423,10 @@ def main():
     print(f"Device: {device}")
     print(f"Results: {run_dir}")
     print(f"Training data: NF={nf_count:,} | FL={fl_count:,} | total={nf_count + fl_count:,}")
+    print(
+        f"Normalization: {config['normalization']} | "
+        f"mean={config['grayscale_mean']:.6f} | std={config['grayscale_std']:.6f}"
+    )
     print(f"Loss weights: NF=1.0000 | FL={config['fl_class_weight']:.6f}")
     print(f"AdamW weight decay: {config['weight_decay']:.6f}")
     print(f"Classifier dropout: {config['dropout']:.3f}")

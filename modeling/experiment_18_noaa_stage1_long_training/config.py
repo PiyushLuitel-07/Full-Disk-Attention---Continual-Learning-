@@ -32,6 +32,11 @@ CONFIG = {
     "mature_holdout_tolerance": 0.02,
     "num_workers": 8,
     "random_seed": 123,
+    # Map grayscale values from [0, 1] to approximately [-1, 1], then repeat
+    # the identically normalized channel for the pretrained RGB backbone.
+    "normalization": "shared_grayscale",
+    "grayscale_mean": 0.5,
+    "grayscale_std": 0.5,
 }
 
 WANDB_ENTITY = "piyush-luitel-texas-christian-university"
