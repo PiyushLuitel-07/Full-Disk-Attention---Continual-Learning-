@@ -1,0 +1,24 @@
+{
+  "checkpoint": "/home/piyushluitel/Full-Disk-Attention---Continual-Learning-/results/noaa_stage1_seed_confirmation/mobilenet_stage1_20261106_223444/stage1_best.pt",
+  "checkpoint_epoch": 10,
+  "selection_dataset": "Stage1_holdout",
+  "selection_metric": "css",
+  "selected_threshold": 0.462,
+  "selected_holdout_metrics": {
+    "threshold": 0.462,
+    "accuracy": 0.9670716889428919,
+    "precision": 0.6006825938566553,
+    "recall": 0.5333333333333333,
+    "f1": 0.565008025682183,
+    "false_positive_rate": 0.01481012658227848,
+    "tss": 0.5185232067510549,
+    "hss": 0.5479589210180161,
+    "css": 0.5330379131863978,
+    "tp": 176,
+    "tn": 7783,
+    "fp": 117,
+    "fn": 154,
+    "predicted_fl_rate": 0.03560145808019441
+  },
+  "preprocessing": "experiment_09_imagenet_rgb"
+}
