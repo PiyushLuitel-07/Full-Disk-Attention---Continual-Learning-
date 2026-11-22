@@ -1,0 +1,48 @@
+name: noaa_experiment_19_joint_training_bayesian
+program: modeling/experiment_19_noaa_joint_training/train.py
+method: bayes
+
+# Each trial selects its epoch using equally weighted macro CSS across the
+# three chronological stage holdouts. Validation ranks completed trials.
+metric:
+  name: validation/css
+  goal: maximize
+
+parameters:
+  # Unweighted, square-root inverse, and exact inverse-frequency weighting.
+  fl_class_weight:
+    values: [1.0, 2.256075460153488, 5.089876481906772]
+
+  # Same ranges used by the Experiment 9 Stage 1 Bayesian sweep.
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.02
+    max: 0.3
+
+  backbone_learning_rate:
+    distribution: log_uniform_values
+    min: 0.0000005
+    max: 0.000003
+
+  # Classifier LR remains derived from backbone LR times this multiplier.
+  classifier_lr_multiplier:
+    values: [5, 10, 20]
+
+  nf_class_weight: {value: 1.0}
+  batch_size: {value: 64}
+  epochs: {value: 60}
+  dropout: {value: 0.0}
+  augmentation: {value: none}
+  scheduler: {value: onecycle}
+  onecycle_pct_start: {value: 0.10}
+  onecycle_div_factor: {value: 10.0}
+  onecycle_final_div_factor: {value: 1000.0}
+  normalization: {value: shared_grayscale}
+  grayscale_mean: {value: 0.5}
+  grayscale_std: {value: 0.5}
+  random_seed: {value: 123}
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
