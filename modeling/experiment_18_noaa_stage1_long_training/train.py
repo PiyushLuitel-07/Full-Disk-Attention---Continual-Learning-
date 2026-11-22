@@ -1,4 +1,4 @@
-"""Train Stage 1 for 100 epochs and select a mature near-best checkpoint."""
+"""Train Stage 1 for 60 epochs and select a mature near-best checkpoint."""
 
 import argparse
 import csv
@@ -353,8 +353,8 @@ def main():
         lr_restart_epoch=args.lr_restart_epoch,
         lr_restart_scale=args.lr_restart_scale,
     )
-    if config["epochs"] != 100:
-        print(f"Warning: requested {config['epochs']} epochs; the planned experiment uses 100.")
+    if config["epochs"] != 60:
+        print(f"Warning: requested {config['epochs']} epochs; the planned experiment uses 60.")
     if not 0 <= config["mature_holdout_tolerance"] <= 1:
         raise ValueError("mature_holdout_tolerance must be between 0 and 1")
     if config["scheduler_patience"] < 0:

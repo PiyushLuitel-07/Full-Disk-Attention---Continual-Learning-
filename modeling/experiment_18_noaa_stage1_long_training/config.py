@@ -17,9 +17,11 @@ CONFIG = {
     "model": "mobilenet_v3_large",
     "pretrained": True,
     "classifier_hidden_dim": 1280,
-    "dropout": 0.0,
+    # Regularize the classifier head to reduce the severe train/holdout gap
+    # observed in the no-dropout OneCycleLR runs.
+    "dropout": 0.2,
     "batch_size": 64,
-    "epochs": 100,
+    "epochs": 60,
     "backbone_learning_rate": 1.3649297100111978e-6,
     "classifier_lr_multiplier": 20.0,
     "weight_decay": 0.05328805613626618,
@@ -51,7 +53,7 @@ WANDB_TAGS = [
     "NOAA",
     "Stage-1",
     "experiment-18",
-    "100-epochs",
+    "60-epochs",
     "inverse-frequency-weighting",
     "mature-checkpoint-selection",
 ]
