@@ -1,6 +1,7 @@
 """Convert detailed NOAA GOES labels into binary NF/FL labels."""
 
 import csv
+import math
 from pathlib import Path
 
 
@@ -16,15 +17,29 @@ OUTPUT_FILE = INPUT_FILE.with_name("labels_noaa_2010_2026_binary.csv")
 
 
 def binary_label(goes_class):
-    """Map M/X events to FL (1); map A/B/C/NF to NF (0)."""
+    """Return 1 only when the GOES peak flux is at least M1.0."""
     goes_class = goes_class.strip().upper()
     if goes_class == "NF":
         return 0
-    if goes_class[:1] in {"A", "B", "C"}:
-        return 0
-    if goes_class[:1] in {"M", "X"}:
-        return 1
-    raise ValueError(f"Unknown GOES class: {goes_class!r}")
+
+    flux_scales = {
+        "A": 1e-8,
+        "B": 1e-7,
+        "C": 1e-6,
+        "M": 1e-5,
+        "X": 1e-4,
+    }
+    category = goes_class[:1]
+    try:
+        magnitude = float(goes_class[1:])
+    except ValueError as error:
+        raise ValueError(f"Unknown GOES class: {goes_class!r}") from error
+
+    if category not in flux_scales or not math.isfinite(magnitude) or magnitude < 0:
+        raise ValueError(f"Unknown GOES class: {goes_class!r}")
+
+    peak_flux = magnitude * flux_scales[category]
+    return int(peak_flux >= 1e-5)
 
 
 def main():
