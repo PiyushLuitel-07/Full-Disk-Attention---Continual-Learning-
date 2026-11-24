@@ -2,9 +2,9 @@
 
 import argparse
 import csv
-from bisect import bisect_left, bisect_right
 from collections import Counter
 from datetime import datetime, timedelta
+import math
 from pathlib import Path
 
 
@@ -31,15 +31,22 @@ def image_time(label):
     return datetime.strptime(name, "HMI.m%Y.%m.%d_%H.%M.%S.jpg")
 
 
-def flare_strength(goes_class):
+GOES_SCALES = {"A": 1e-8, "B": 1e-7, "C": 1e-6, "M": 1e-5, "X": 1e-4}
+
+
+def goes_peak_flux(goes_class):
     goes_class = goes_class.strip().upper()
     if goes_class == "NF":
-        return -1, 0.0
-    return {"A": 0, "B": 1, "C": 2, "M": 3, "X": 4}[goes_class[0]], float(goes_class[1:])
+        return 0.0
+    category = goes_class[:1]
+    magnitude = float(goes_class[1:])
+    if category not in GOES_SCALES or not math.isfinite(magnitude) or magnitude < 0:
+        raise ValueError(f"Invalid GOES class: {goes_class!r}")
+    return magnitude * GOES_SCALES[category]
 
 
 def binary_label(goes_class):
-    return int(goes_class.strip().upper()[:1] in {"M", "X"})
+    return int(goes_peak_flux(goes_class) >= 1e-5)
 
 
 def load_events():
@@ -48,11 +55,11 @@ def load_events():
     for row in raw:
         try:
             time = datetime.strptime(row["Begin"].strip(), "%Y-%m-%d %H:%M:%S")
-            flare_strength(row["GOES class"])
+            flux = goes_peak_flux(row["GOES class"])
         except (KeyError, ValueError):
             invalid += 1
             continue
-        events.append((time, row["GOES class"].strip().upper()))
+        events.append((time, row["GOES class"].strip().upper(), flux))
     events.sort()
     return raw, events, invalid
 
@@ -82,14 +89,19 @@ def main():
     mapping_errors = [label for label, row in detailed.items()
                       if binary_label(row["goes_class"]) != binary[label]]
     raw_catalogue, events, invalid_events = load_events()
-    event_times = [event[0] for event in events]
     recompute_errors = []
-    for label, row in detailed.items():
+    active_events = []
+    next_event = 0
+    ordered_labels = sorted(detailed, key=image_time)
+    for label in ordered_labels:
+        row = detailed[label]
         time = image_time(label)
-        first = bisect_right(event_times, time)
-        last = bisect_left(event_times, time + timedelta(hours=24))
-        expected = max((event[1] for event in events[first:last]),
-                       key=flare_strength, default="NF")
+        window_end = time + timedelta(hours=24)
+        while next_event < len(events) and events[next_event][0] < window_end:
+            active_events.append(events[next_event])
+            next_event += 1
+        active_events = [event for event in active_events if event[0] > time]
+        expected = max(active_events, key=lambda event: event[2])[1] if active_events else "NF"
         if expected != row["goes_class"].strip().upper():
             recompute_errors.append((label, row["goes_class"], expected))
 
@@ -113,7 +125,7 @@ def main():
         times = [image_time(label) for label in labels]
         fl = sum(int(row["goes_class"]) for row in rows)
         detailed_split = [detailed[label]["goes_class"].strip().upper() for label in labels]
-        hard_c = sum(cls.startswith("C") and 4.0 <= flare_strength(cls)[1] < 10.0
+        hard_c = sum(cls.startswith("C") and 4.0 <= float(cls[1:]) < 10.0
                      for cls in detailed_split)
         negatives = len(rows) - fl
         gap = "N/A" if previous_end is None else str(min(times) - previous_end)
