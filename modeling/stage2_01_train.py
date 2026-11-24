@@ -47,8 +47,8 @@ STAGE1_EWC_CHECKPOINT = (
     / "stage1_ewc_ready.pt"
 )
 
-# This value is replaced by wandb.config during the lambda sweep.
-EWC_LAMBDA = 1.0
+# Default to 0.0 for naive sequential fine-tuning baseline. Replaced by wandb.config during sweeps.
+EWC_LAMBDA = 0.0
 
 
 def select_stage(stages, stage_number):
@@ -192,8 +192,8 @@ def main():
     ) as tracker:
         # Only lambda should be supplied by the Stage 2 sweep.
         ewc_lambda = float(tracker.config["ewc_lambda"])
-        if ewc_lambda <= 0:
-            raise ValueError("Stage 2 EWC lambda must be greater than zero.")
+        if ewc_lambda < 0:
+            raise ValueError("Stage 2 EWC lambda cannot be negative.")
 
         # Recreate the model and restore the exact selected Stage 1 weights.
         model = Attn_Net(

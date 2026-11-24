@@ -99,9 +99,9 @@ def load_stage2_checkpoint(checkpoint_path, device):
         )
 
     ewc_lambda = float(checkpoint["config"].get("ewc_lambda", 0.0))
-    if ewc_lambda <= 0:
+    if ewc_lambda < 0:
         raise ValueError(
-            "The selected Stage 2 checkpoint must contain a positive "
+            "The selected Stage 2 checkpoint cannot contain a negative "
             "ewc_lambda."
         )
 
