@@ -1,0 +1,22 @@
+[
+  {
+    "Model": "Sequential Fine-Tuning (Stage 2)",
+    "Stage1_CSS": 0.44402790168061657,
+    "Stage1_Retention_Pct": 83.32206272749652,
+    "Stage1_Forgetting": 0.08887765435776762,
+    "Stage2_CSS": 0.05538811407632906,
+    "Stage3_CSS": null,
+    "Val_CSS": 0.02938135540907292,
+    "Test_CSS": 0.08158307543938714
+  },
+  {
+    "Model": "Sequential Fine-Tuning (Stage 3)",
+    "Stage1_CSS": 0.1837754156558043,
+    "Stage1_Retention_Pct": 34.48555068969243,
+    "Stage1_Forgetting": 0.3491301403825799,
+    "Stage2_CSS": 0.005685703981878733,
+    "Stage3_CSS": 0.13210041248405596,
+    "Val_CSS": 0.05846292014216691,
+    "Test_CSS": 0.0
+  }
+]
