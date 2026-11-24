@@ -133,7 +133,7 @@ def load_events():
 
 
 def create_label_rows(images, events):
-    """Create labels with an explicit, inclusive 24-hour forecast window.
+    """Create labels with an explicit 24-hour forecast window.
 
     The event cursor moves forward once through the chronological catalogue.
     ``active_events`` then contains only events satisfying

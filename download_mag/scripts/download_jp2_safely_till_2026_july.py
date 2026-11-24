@@ -66,7 +66,10 @@ def write_log(
 
 def download_from_helioviewer():
     """
-    Download HMI magnetograms from Helioviewer at a 12-minute cadence.
+    Download hourly HMI magnetograms from Helioviewer.
+
+    For each requested hour, accept Helioviewer's nearest observation only
+    when its actual timestamp is within 12 minutes of the requested time.
 
     Existing files are skipped, allowing the script to resume after
     interruption.
