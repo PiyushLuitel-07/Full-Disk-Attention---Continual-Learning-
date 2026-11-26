@@ -262,6 +262,7 @@ def main():
         trainable_backbone_blocks=int(config.get("trainable_backbone_blocks", 2)),
         hidden_dim=int(config["classifier_hidden_dim"]),
         dropout=float(config["dropout"]),
+        bn_momentum=config.get("bn_momentum", 0.1),
     ).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(model, config)
@@ -319,7 +320,8 @@ def main():
     logger.info(f"Device: {device} ({system_config['gpu_name']}) | PyTorch: {system_config['pytorch_version']} | Seed: {seed}")
     logger.info(
         f"Model: {config['model']} | freeze_backbone={config['freeze_backbone']} | "
-        f"dropout={config['dropout']} | Params: {system_config['trainable_parameters']:,}/{system_config['total_parameters']:,}"
+        f"dropout={config['dropout']} | bn_momentum={config.get('bn_momentum', 0.1)} | "
+        f"Params: {system_config['trainable_parameters']:,}/{system_config['total_parameters']:,}"
     )
     logger.info(
         f"Optimizer: {config['optimizer']} | LR={config['learning_rate']} | WD={config['weight_decay']} | "

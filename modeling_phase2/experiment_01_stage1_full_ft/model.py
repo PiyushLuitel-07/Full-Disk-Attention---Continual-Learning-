@@ -4,10 +4,23 @@ from torch import nn
 from torchvision.models import MobileNet_V3_Large_Weights, mobilenet_v3_large
 
 
-def build_model(pretrained=True, freeze_backbone=False, trainable_backbone_blocks=2, hidden_dim=1280, dropout=0.0):
+def build_model(
+    pretrained=True,
+    freeze_backbone=False,
+    trainable_backbone_blocks=2,
+    hidden_dim=1280,
+    dropout=0.0,
+    bn_momentum=0.1,
+):
     """Build MobileNetV3-Large with a 2-class (NF/FL) classifier head."""
     weights = MobileNet_V3_Large_Weights.DEFAULT if pretrained else None
     model = mobilenet_v3_large(weights=weights)
+
+    if bn_momentum is not None:
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.momentum = float(bn_momentum)
+                module.reset_running_stats()
 
     if freeze_backbone:
         frozen_blocks = len(model.features) - trainable_backbone_blocks

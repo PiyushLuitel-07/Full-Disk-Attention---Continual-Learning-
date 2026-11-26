@@ -23,6 +23,7 @@ CONFIG = {
     "trainable_backbone_blocks": 2,
     "classifier_hidden_dim": 1280,
     "dropout": 0.3,
+    "bn_momentum": 0.1,
 
     # Input preprocessing: symmetric grayscale normalization maps [0, 1] -> [-1, 1]
     # identically across all 3 repeated channels without RGB bias.
