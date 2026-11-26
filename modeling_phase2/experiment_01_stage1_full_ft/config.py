@@ -19,27 +19,27 @@ CONFIG = {
     # Architecture: ImageNet weights are used only as the starting point; all layers update.
     "model": "mobilenet_v3_large",
     "pretrained": True,
-    "freeze_backbone": False,
+    "freeze_backbone": True,
+    "trainable_backbone_blocks": 2,
     "classifier_hidden_dim": 1280,
-    "dropout": 0.3,  # Regularize classifier head to prevent memorizing Stage 1 training disks.
+    "dropout": 0.0,
 
-    # Input preprocessing: symmetric grayscale normalization maps [0, 1] -> [-1, 1]
-    # identically across all 3 repeated channels without RGB bias.
+    # Input preprocessing: ImageNet normalization matching frozen early ImageNet blocks.
     "image_size": 512,
-    "normalization": "shared_grayscale",
+    "normalization": "imagenet",
     "grayscale_mean": 0.5,
     "grayscale_std": 0.5,
 
     # Sampling & loss: 1:1 FL/NF per epoch, cycling through all unique NF images across epochs.
     "sampling": "cyclic_balanced",
     "loss": "ordinary_cross_entropy",
-    "augmentation": "flip_rot10",
+    "augmentation": "none",
 
-    # Optimization: single learning rate in the proven [1e-5, 1e-4] sweet spot for full fine-tuning.
+    # Optimization: single learning rate matching Exp 01.
     "optimizer": "adamw",
-    "learning_rate": 3e-5,
+    "learning_rate": 1e-4,
     "min_learning_rate": 1e-7,
-    "weight_decay": 0.05,
+    "weight_decay": 0.01,
     "batch_size": 64,
 
     # Schedule & training length: fixed 40 epochs (~11.7 full NF passes) without premature early

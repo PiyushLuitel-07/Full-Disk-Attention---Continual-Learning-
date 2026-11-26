@@ -11,15 +11,23 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision import transforms
 
 
-class MagnetogramDataset(Dataset):
-    """Load 512x512 magnetograms and their binary targets with symmetric grayscale normalization."""
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
-    def __init__(self, csv_file, image_directory, grayscale_mean=0.5, grayscale_std=0.5, augment=False):
+
+class MagnetogramDataset(Dataset):
+    """Load 512x512 magnetograms and their binary targets."""
+
+    def __init__(self, csv_file, image_directory, normalization="imagenet", grayscale_mean=0.5, grayscale_std=0.5, augment=False):
         rows = pd.read_csv(csv_file)
         self.paths = [Path(image_directory) / value for value in rows["label"]]
         self.targets = rows["goes_class"].astype(int).tolist()
-        self.mean = (grayscale_mean, grayscale_mean, grayscale_mean)
-        self.std = (grayscale_std, grayscale_std, grayscale_std)
+        if normalization == "imagenet":
+            self.mean = IMAGENET_MEAN
+            self.std = IMAGENET_STD
+        else:
+            self.mean = (grayscale_mean, grayscale_mean, grayscale_mean)
+            self.std = (grayscale_std, grayscale_std, grayscale_std)
         self.augment = (
             transforms.RandomChoice([
                 transforms.Lambda(lambda img: img),
@@ -118,16 +126,17 @@ def build_loaders(
     batch_size=64,
     num_workers=8,
     seed=42,
+    normalization="imagenet",
     grayscale_mean=0.5,
     grayscale_std=0.5,
     augment=False,
 ):
     """Build balanced training, natural-training, and holdout loaders."""
     train_data = MagnetogramDataset(
-        train_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std, augment=augment
+        train_csv, image_directory, normalization=normalization, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std, augment=augment
     )
     holdout_data = MagnetogramDataset(
-        holdout_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
+        holdout_csv, image_directory, normalization=normalization, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
     )
     balanced_sampler = CyclicBalancedSampler(train_data.targets, seed=seed)
 
@@ -144,11 +153,12 @@ def build_evaluation_loader(
     image_directory,
     batch_size=64,
     num_workers=8,
+    normalization="imagenet",
     grayscale_mean=0.5,
     grayscale_std=0.5,
 ):
     """Build an evaluation DataLoader for validation or test splits."""
     dataset = MagnetogramDataset(
-        csv_file, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
+        csv_file, image_directory, normalization=normalization, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
     )
     return _loader(dataset, batch_size, num_workers)

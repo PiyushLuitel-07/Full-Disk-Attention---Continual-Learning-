@@ -246,6 +246,7 @@ def main():
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
         seed=seed,
+        normalization=config.get("normalization", "imagenet"),
         grayscale_mean=float(config["grayscale_mean"]),
         grayscale_std=float(config["grayscale_std"]),
         augment=(config.get("augmentation", "none") != "none"),
@@ -255,6 +256,7 @@ def main():
         IMAGE_DIR,
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
+        normalization=config.get("normalization", "imagenet"),
         grayscale_mean=float(config["grayscale_mean"]),
         grayscale_std=float(config["grayscale_std"]),
     )
@@ -262,6 +264,7 @@ def main():
     model = build_model(
         pretrained=bool(config["pretrained"]),
         freeze_backbone=bool(config["freeze_backbone"]),
+        trainable_backbone_blocks=int(config.get("trainable_backbone_blocks", 2)),
         hidden_dim=int(config["classifier_hidden_dim"]),
         dropout=float(config["dropout"]),
     ).to(device)
