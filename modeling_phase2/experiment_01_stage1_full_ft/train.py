@@ -1,0 +1,465 @@
+"""Train Stage 1 MobileNetV3-Large with full fine-tuning, single LR, and CyclicBalancedSampler."""
+
+import csv
+import json
+import logging
+import random
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
+import torch
+import wandb
+from torch import nn
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parents[1]
+sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.append(str(ROOT / "modeling_phase1"))
+
+from config import CONFIG, HOLDOUT_CSV, IMAGE_DIR, RESULTS_DIR, TEST_CSV, TRAIN_CSV, WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS
+from dataloader import build_evaluation_loader, build_loaders
+from evaluation import calculate_classification_metrics
+from model import build_model
+
+
+def setup_logger(log_path):
+    """Configure logger writing detailed timestamps to both console and training.log."""
+    logger = logging.getLogger("phase2_stage1")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    formatter = logging.Formatter("%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    return logger
+
+
+def format_metrics(label, m, include_loss=True):
+    """Format classification metrics on one readable line."""
+    loss_str = f"Loss={m['loss']:.4f} | " if include_loss and "loss" in m else ""
+    return (
+        f"  {label:<15} | {loss_str}"
+        f"CSS={m['css']:.4f} TSS={m['tss']:.4f} HSS={m['hss']:.4f} F1={m['f1']:.4f} | "
+        f"Prec={m['precision']:.4f} Rec={m['recall']:.4f} Acc={m['accuracy']:.4f}"
+    )
+
+
+def add_rates(metrics):
+    """Add predicted flare rate, FPR, and FNR for imbalanced evaluation diagnostics."""
+    total = metrics["tp"] + metrics["tn"] + metrics["fp"] + metrics["fn"]
+    actual_nf = metrics["tn"] + metrics["fp"]
+    actual_fl = metrics["tp"] + metrics["fn"]
+    metrics["predicted_fl_rate"] = (metrics["tp"] + metrics["fp"]) / total if total else 0.0
+    metrics["false_positive_rate"] = metrics["fp"] / actual_nf if actual_nf else 0.0
+    metrics["false_negative_rate"] = metrics["fn"] / actual_fl if actual_fl else 0.0
+    return metrics
+
+
+def build_optimizer(model, config):
+    """Build AdamW with one shared learning rate and no weight decay on biases/1D norms."""
+    decay_params = []
+    no_decay_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.endswith(".bias") or param.ndim == 1:
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+
+    lr = float(config["learning_rate"])
+    return AdamW([
+        {"params": decay_params, "lr": lr, "weight_decay": float(config["weight_decay"])},
+        {"params": no_decay_params, "lr": lr, "weight_decay": 0.0},
+    ])
+
+
+def run_epoch(model, loader, criterion, device, optimizer=None):
+    """Run one training or evaluation pass and return loss + classification metrics."""
+    training = optimizer is not None
+    model.train(training)
+
+    predictions, targets = [], []
+    loss_sum = torch.zeros((), device=device)
+    image_count = 0
+
+    with torch.set_grad_enabled(training):
+        for images, batch_targets in loader:
+            images = images.to(device, non_blocking=True)
+            batch_targets = batch_targets.to(device, non_blocking=True)
+
+            if training:
+                optimizer.zero_grad(set_to_none=True)
+
+            scores = model(images)
+            loss = criterion(scores, batch_targets)
+
+            if training:
+                loss.backward()
+                optimizer.step()
+
+            batch_size = images.size(0)
+            loss_sum += loss.detach() * batch_size
+            image_count += batch_size
+            predictions.append(scores.argmax(dim=1).detach())
+            targets.append(batch_targets.detach())
+
+    all_preds = torch.cat(predictions).cpu().tolist()
+    all_targets = torch.cat(targets).cpu().tolist()
+    metrics = calculate_classification_metrics(all_preds, all_targets)
+    metrics["loss"] = (loss_sum / image_count).item()
+    return add_rates(metrics)
+
+
+def save_checkpoint(path, model, optimizer, scheduler, epoch, holdout_metrics, train_metrics, config):
+    """Save model, optimizer, scheduler, and metrics to disk."""
+    torch.save(
+        {
+            "completed_stage": 1,
+            "architecture": config["model"],
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "holdout_metrics": holdout_metrics,
+            "train_metrics": train_metrics,
+            "config": config,
+        },
+        path,
+    )
+
+
+def evaluate_checkpoint(ckpt_path, model, loaders, test_loader, criterion, device):
+    """Restore a saved checkpoint and evaluate it on Holdout V1 and Test Set (read-only)."""
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+    v1_metrics = run_epoch(model, loaders["holdout"], criterion, device)
+    test_metrics = run_epoch(model, test_loader, criterion, device)
+    return ckpt["epoch"], v1_metrics, test_metrics
+
+
+def plot_training_curves(metrics_path, run_dir, best_holdout_epoch, best_mature_epoch):
+    """Plot balanced train, natural train, and V1 holdout metrics across epochs."""
+    df = pd.read_csv(metrics_path)
+    epochs = df["epoch"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10), dpi=300)
+    panels = [
+        ("css", "CSS (Composite Skill Score)", (0.0, 1.05)),
+        ("tss", "TSS (True Skill Statistic)", (-0.1, 1.05)),
+        ("hss", "HSS (Heidke Skill Score)", (-0.1, 1.05)),
+        ("f1", "F1 Score", (0.0, 1.05)),
+        ("recall", "Recall (POD) & Precision", (0.0, 1.05)),
+        ("loss", "Loss & Learning Rate", None),
+    ]
+
+    for ax, (metric, title, ylim) in zip(axes.flat, panels):
+        if metric == "loss":
+            ax.plot(epochs, df["balanced_train_loss"], label="Balanced Train Loss", color="#1f77b4", lw=2)
+            ax.plot(epochs, df["holdout_loss"], label="Holdout V1 Loss", color="#d62728", lw=2)
+            ax_lr = ax.twinx()
+            ax_lr.plot(epochs, df["learning_rate"], label="Learning Rate", color="#7f7f7f", ls=":", lw=1.8)
+            ax_lr.set_yscale("log")
+            ax_lr.set_ylabel("Learning Rate", color="#7f7f7f")
+            ax.set_ylabel("Cross-Entropy Loss")
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = ax_lr.get_legend_handles_labels()
+            ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=8)
+        elif metric == "recall":
+            ax.plot(epochs, df["balanced_train_recall"], label="Bal Train Recall", color="#1f77b4", lw=2)
+            ax.plot(epochs, df["holdout_recall"], label="Holdout V1 Recall", color="#d62728", lw=2)
+            ax.plot(epochs, df["balanced_train_precision"], label="Bal Train Prec", color="#1f77b4", ls="--", lw=1.6)
+            ax.plot(epochs, df["holdout_precision"], label="Holdout V1 Prec", color="#d62728", ls="--", lw=1.6)
+            ax.legend(loc="best", fontsize=8)
+        else:
+            ax.plot(epochs, df[f"balanced_train_{metric}"], label="Balanced Train", color="#1f77b4", lw=2)
+            ax.plot(epochs, df[f"natural_train_{metric}"], label="Natural Train", color="#2ca02c", ls="--", lw=1.8)
+            ax.plot(epochs, df[f"holdout_{metric}"], label="Holdout V1", color="#d62728", lw=2)
+            ax.legend(loc="best", fontsize=8)
+
+        if best_holdout_epoch:
+            ax.axvline(best_holdout_epoch, color="#d62728", ls="-.", lw=1.1, alpha=0.6)
+        if best_mature_epoch:
+            ax.axvline(best_mature_epoch, color="#9467bd", ls="-.", lw=1.1, alpha=0.6)
+
+        ax.set_title(title, fontweight="bold")
+        ax.set_xlabel("Epoch")
+        ax.grid(True, alpha=0.25)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+
+    fig.suptitle(
+        f"Stage 1 Full Fine-Tuning Curves (Best V1: ep {best_holdout_epoch} | Mature: ep {best_mature_epoch})",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    plot_path = run_dir / "training_curves.png"
+    fig.savefig(plot_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return plot_path
+
+
+def main():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = RESULTS_DIR / f"mobilenet_stage1_full_ft_{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    run = wandb.init(
+        entity=WANDB_ENTITY,
+        project=WANDB_PROJECT,
+        name=f"phase2_stage1_full_ft_{timestamp}",
+        config=CONFIG,
+        dir=str(run_dir),
+        tags=WANDB_TAGS,
+        job_type="phase2-stage1-baseline",
+    )
+    config = dict(run.config)
+
+    seed = int(config["random_seed"])
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.cuda.set_device(0)
+
+    loaders = build_loaders(
+        TRAIN_CSV,
+        HOLDOUT_CSV,
+        IMAGE_DIR,
+        batch_size=int(config["batch_size"]),
+        num_workers=int(config["num_workers"]),
+        seed=seed,
+        grayscale_mean=float(config["grayscale_mean"]),
+        grayscale_std=float(config["grayscale_std"]),
+    )
+    test_loader = build_evaluation_loader(
+        TEST_CSV,
+        IMAGE_DIR,
+        batch_size=int(config["batch_size"]),
+        num_workers=int(config["num_workers"]),
+        grayscale_mean=float(config["grayscale_mean"]),
+        grayscale_std=float(config["grayscale_std"]),
+    )
+
+    model = build_model(
+        pretrained=bool(config["pretrained"]),
+        freeze_backbone=bool(config["freeze_backbone"]),
+        hidden_dim=int(config["classifier_hidden_dim"]),
+        dropout=float(config["dropout"]),
+    ).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = build_optimizer(model, config)
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=float(config["scheduler_factor"]),
+        patience=int(config["scheduler_patience"]),
+        threshold=1e-3,
+        threshold_mode="abs",
+        min_lr=float(config["min_learning_rate"]),
+    )
+
+    sampler = loaders["balanced_sampler"]
+    system_config = {
+        "device": str(device),
+        "gpu_name": torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU",
+        "train_original_samples": len(loaders["natural_train"].dataset),
+        "train_samples_per_epoch": len(sampler),
+        "holdout_samples": len(loaders["holdout"].dataset),
+        "test_samples": len(test_loader.dataset),
+        "total_parameters": sum(p.numel() for p in model.parameters()),
+        "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "train_csv": str(TRAIN_CSV),
+        "holdout_csv": str(HOLDOUT_CSV),
+        "test_csv": str(TEST_CSV),
+        "pytorch_version": str(torch.__version__),
+    }
+    run.config.update(system_config, allow_val_change=True)
+    config.update(system_config)
+
+    with (run_dir / "config.json").open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+    run.define_metric("epoch")
+    for group in ("balanced_train", "natural_train", "holdout"):
+        run.define_metric(f"{group}/*", step_metric="epoch")
+
+    best_holdout_ckpt = run_dir / "stage1_best_holdout.pt"
+    mature_ckpt = run_dir / "stage1_selected_mature.pt"
+    last_ckpt = run_dir / "stage1_last.pt"
+    metrics_path = run_dir / "epoch_metrics.csv"
+    final_metrics_path = run_dir / "final_metrics.csv"
+
+    best_holdout_css = float("-inf")
+    best_holdout_epoch = 0
+    best_mature_css = float("-inf")
+    best_mature_epoch = 0
+    cumulative_nf = set()
+    rows = []
+
+    logger = setup_logger(run_dir / "training.log")
+    logger.info("=" * 85)
+    logger.info(f"Phase 2 Stage 1 Full Fine-Tuning | Run Dir: {run_dir}")
+    logger.info(f"Device: {device} ({system_config['gpu_name']}) | PyTorch: {system_config['pytorch_version']} | Seed: {seed}")
+    logger.info(
+        f"Model: {config['model']} | freeze_backbone={config['freeze_backbone']} | "
+        f"dropout={config['dropout']} | Params: {system_config['trainable_parameters']:,}/{system_config['total_parameters']:,}"
+    )
+    logger.info(
+        f"Optimizer: {config['optimizer']} | LR={config['learning_rate']} | WD={config['weight_decay']} | "
+        f"Batch={config['batch_size']} | Norm=({config['grayscale_mean']}, {config['grayscale_std']})"
+    )
+    logger.info(
+        f"Scheduler: ReduceLROnPlateau(factor={config['scheduler_factor']}, patience={config['scheduler_patience']}, "
+        f"min_lr={config['min_learning_rate']}) | Epochs={config['epochs']}"
+    )
+    logger.info(
+        f"Data: Train={system_config['train_original_samples']:,} "
+        f"(FL={len(sampler.fl_indices):,}, NF={len(sampler.nf_indices):,}, Balanced/ep={len(sampler):,}) | "
+        f"Holdout V1={system_config['holdout_samples']:,} | Test={system_config['test_samples']:,}"
+    )
+    logger.info("=" * 85)
+
+    total_epochs = int(config["epochs"])
+    for epoch in range(1, total_epochs + 1):
+        epoch_start = time.perf_counter()
+
+        t0 = time.perf_counter()
+        balanced_metrics = run_epoch(model, loaders["balanced_train"], criterion, device, optimizer)
+        balanced_seconds = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        natural_metrics = run_epoch(model, loaders["natural_train"], criterion, device)
+        natural_seconds = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        holdout_metrics = run_epoch(model, loaders["holdout"], criterion, device)
+        holdout_seconds = time.perf_counter() - t0
+
+        learning_rate = optimizer.param_groups[0]["lr"]
+        scheduler.step(holdout_metrics["css"])
+        new_lr = optimizer.param_groups[0]["lr"]
+        cumulative_nf.update(sampler.last_nf_indices)
+
+        saved_tags = []
+        if holdout_metrics["css"] > best_holdout_css:
+            best_holdout_css = holdout_metrics["css"]
+            best_holdout_epoch = epoch
+            save_checkpoint(best_holdout_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+            saved_tags.append("best_holdout")
+
+        is_mature = (
+            epoch >= int(config["mature_min_epoch"])
+            and balanced_metrics["css"] >= float(config["mature_min_train_css"])
+        )
+        if is_mature and holdout_metrics["css"] > best_mature_css:
+            best_mature_css = holdout_metrics["css"]
+            best_mature_epoch = epoch
+            save_checkpoint(mature_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+
+        if epoch == total_epochs:
+            save_checkpoint(last_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+            saved_tags.append("last_epoch")
+
+        epoch_seconds = time.perf_counter() - epoch_start
+        sampling_metrics = {
+            "nf_cycle": sampler.cycle,
+            "nf_used_this_epoch": len(sampler.last_nf_indices),
+            "nf_unique_this_epoch": len(set(sampler.last_nf_indices)),
+            "nf_cumulative_unique": len(cumulative_nf),
+            "nf_cumulative_coverage": len(cumulative_nf) / len(sampler.nf_indices),
+        }
+        timing_metrics = {
+            "balanced_train_seconds": balanced_seconds,
+            "natural_train_seconds": natural_seconds,
+            "holdout_seconds": holdout_seconds,
+            "epoch_seconds": epoch_seconds,
+        }
+        natural_logged = {k: v for k, v in natural_metrics.items() if k != "loss"}
+
+        logged = {
+            "epoch": epoch,
+            "learning_rate": learning_rate,
+            "best_holdout_css": best_holdout_css,
+            "best_holdout_epoch": best_holdout_epoch,
+            "best_mature_css": best_mature_css if best_mature_epoch else 0.0,
+            "best_mature_epoch": best_mature_epoch,
+            **{f"balanced_train/{k}": v for k, v in balanced_metrics.items()},
+            **{f"natural_train/{k}": v for k, v in natural_logged.items()},
+            **{f"holdout/{k}": v for k, v in holdout_metrics.items()},
+            **{f"sampling/{k}": v for k, v in sampling_metrics.items()},
+            **{f"timing/{k}": v for k, v in timing_metrics.items()},
+        }
+        run.log(logged)
+        rows.append({k.replace("/", "_"): v for k, v in logged.items()})
+
+        with metrics_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+
+        logger.info(
+            f"Epoch {epoch:02d}/{total_epochs} | LR={learning_rate:.2e} | "
+            f"NF_cycle={sampler.cycle} ({sampling_metrics['nf_cumulative_coverage']:.1%}) | "
+            f"Time={epoch_seconds:.1f}s (bal={balanced_seconds:.1f}s, nat={natural_seconds:.1f}s, v1={holdout_seconds:.1f}s)"
+        )
+        logger.info(format_metrics("Balanced Train", balanced_metrics, include_loss=True))
+        logger.info(format_metrics("Holdout V1", holdout_metrics, include_loss=True))
+        if saved_tags:
+            logger.info(f"  [CHECKPOINT SAVED] {', '.join(saved_tags)} (Best V1 CSS={best_holdout_css:.4f} @ ep {best_holdout_epoch})")
+        if new_lr < learning_rate:
+            logger.info(f"  [LR DECAY] {learning_rate:.2e} -> {new_lr:.2e}")
+
+    logger.info("=" * 85)
+    logger.info("FINAL CHECKPOINT EVALUATIONS (Holdout V1 & Untouched Test Set)")
+    final_rows = []
+    for ckpt_label, ckpt_path in [
+        ("best_holdout", best_holdout_ckpt),
+        ("selected_mature", mature_ckpt),
+        ("last_epoch", last_ckpt),
+    ]:
+        if not ckpt_path.exists():
+            continue
+        ckpt_epoch, v1_m, test_m = evaluate_checkpoint(ckpt_path, model, loaders, test_loader, criterion, device)
+        logger.info(f"Checkpoint [{ckpt_label}] (Epoch {ckpt_epoch}):")
+        logger.info(format_metrics("  Holdout V1", v1_m, include_loss=True))
+        logger.info(format_metrics("  Test Set", test_m, include_loss=True))
+        run.log({
+            **{f"{ckpt_label}_v1/{k}": v for k, v in v1_m.items()},
+            **{f"{ckpt_label}_test/{k}": v for k, v in test_m.items()},
+        })
+        final_rows.append({"checkpoint": ckpt_label, "epoch": ckpt_epoch, "split": "holdout_v1", **v1_m})
+        final_rows.append({"checkpoint": ckpt_label, "epoch": ckpt_epoch, "split": "test", **test_m})
+
+    with final_metrics_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=final_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(final_rows)
+
+    plot_path = plot_training_curves(metrics_path, run_dir, best_holdout_epoch, best_mature_epoch)
+    logger.info(f"Saved training curves plot: {plot_path}")
+    run.log({"training_curves": wandb.Image(str(plot_path))})
+    logger.info("=" * 85)
+
+    run.finish()
+
+
+if __name__ == "__main__":
+    main()

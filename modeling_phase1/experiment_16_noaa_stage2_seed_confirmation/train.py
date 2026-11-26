@@ -23,10 +23,10 @@ from config import (
 
 sys.path.insert(0, str(ROOT))
 
-from modeling.evaluation import calculate_classification_metrics
-from modeling.experiment_13_noaa_stage2_ewc.dataloader import build_loader, build_stage2_loaders, class_counts
-from modeling.experiment_13_noaa_stage2_ewc.ewc import ewc_penalty, move_ewc_anchor_to_device
-from modeling.experiment_13_noaa_stage2_ewc.model import build_model
+from modeling_phase1.evaluation import calculate_classification_metrics
+from modeling_phase1.experiment_13_noaa_stage2_ewc.dataloader import build_loader, build_stage2_loaders, class_counts
+from modeling_phase1.experiment_13_noaa_stage2_ewc.ewc import ewc_penalty, move_ewc_anchor_to_device
+from modeling_phase1.experiment_13_noaa_stage2_ewc.model import build_model
 
 
 def rates(metrics):
