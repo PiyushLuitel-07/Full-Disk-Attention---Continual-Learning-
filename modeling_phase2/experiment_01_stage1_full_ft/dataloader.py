@@ -11,15 +11,19 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision import transforms
 
 
-class MagnetogramDataset(Dataset):
-    """Load 512x512 magnetograms and their binary targets with symmetric grayscale normalization."""
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
-    def __init__(self, csv_file, image_directory, grayscale_mean=0.5, grayscale_std=0.5, augment=False):
+
+class MagnetogramDataset(Dataset):
+    """Load 512x512 magnetograms and their binary targets."""
+
+    def __init__(self, csv_file, image_directory, mean=IMAGENET_MEAN, std=IMAGENET_STD, augment=False):
         rows = pd.read_csv(csv_file)
         self.paths = [Path(image_directory) / value for value in rows["label"]]
         self.targets = rows["goes_class"].astype(int).tolist()
-        self.mean = (grayscale_mean, grayscale_mean, grayscale_mean)
-        self.std = (grayscale_std, grayscale_std, grayscale_std)
+        self.mean = tuple(mean)
+        self.std = tuple(std)
         self.augment = (
             transforms.RandomChoice([
                 transforms.Lambda(lambda img: img),
@@ -36,10 +40,8 @@ class MagnetogramDataset(Dataset):
     def __getitem__(self, index):
         with Image.open(self.paths[index]) as opened_image:
             image = opened_image.convert("L")
-            # Augment only FL (target == 1) images since they repeat every epoch; NF images already cycle.
             if self.augment is not None and self.targets[index] == 1:
                 image = self.augment(image)
-            # Repeat single-channel magnetogram into 3 identical channels, then map [0, 1] -> [-1, 1].
             tensor = TF.to_tensor(image).repeat(3, 1, 1)
 
         tensor = TF.normalize(tensor, self.mean, self.std)
@@ -118,24 +120,31 @@ def build_loaders(
     batch_size=64,
     num_workers=8,
     seed=42,
-    grayscale_mean=0.5,
-    grayscale_std=0.5,
+    mean=IMAGENET_MEAN,
+    std=IMAGENET_STD,
     augment=False,
+    sampling="full_training_data",
 ):
-    """Build balanced training, natural-training, and holdout loaders."""
-    train_data = MagnetogramDataset(
-        train_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std, augment=augment
-    )
-    holdout_data = MagnetogramDataset(
-        holdout_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
-    )
-    balanced_sampler = CyclicBalancedSampler(train_data.targets, seed=seed)
+    """Build training and holdout loaders for full_training_data or cyclic_balanced sampling."""
+    train_data = MagnetogramDataset(train_csv, image_directory, mean=mean, std=std, augment=augment)
+    holdout_data = MagnetogramDataset(holdout_csv, image_directory, mean=mean, std=std)
+
+    if sampling == "cyclic_balanced":
+        balanced_sampler = CyclicBalancedSampler(train_data.targets, seed=seed)
+        return {
+            "train": _loader(train_data, batch_size, num_workers, sampler=balanced_sampler),
+            "natural_train": _loader(train_data, batch_size, num_workers),
+            "holdout": _loader(holdout_data, batch_size, num_workers),
+            "balanced_sampler": balanced_sampler,
+            "targets": train_data.targets,
+        }
 
     return {
-        "balanced_train": _loader(train_data, batch_size, num_workers, sampler=balanced_sampler),
-        "natural_train": _loader(train_data, batch_size, num_workers),
+        "train": _loader(train_data, batch_size, num_workers, shuffle=True),
+        "natural_train": None,
         "holdout": _loader(holdout_data, batch_size, num_workers),
-        "balanced_sampler": balanced_sampler,
+        "balanced_sampler": None,
+        "targets": train_data.targets,
     }
 
 
@@ -144,11 +153,9 @@ def build_evaluation_loader(
     image_directory,
     batch_size=64,
     num_workers=8,
-    grayscale_mean=0.5,
-    grayscale_std=0.5,
+    mean=IMAGENET_MEAN,
+    std=IMAGENET_STD,
 ):
     """Build an evaluation DataLoader for validation or test splits."""
-    dataset = MagnetogramDataset(
-        csv_file, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
-    )
+    dataset = MagnetogramDataset(csv_file, image_directory, mean=mean, std=std)
     return _loader(dataset, batch_size, num_workers)

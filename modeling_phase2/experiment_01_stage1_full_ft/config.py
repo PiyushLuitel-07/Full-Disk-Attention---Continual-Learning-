@@ -22,39 +22,36 @@ CONFIG = {
     "freeze_backbone": False,
     "trainable_backbone_blocks": 2,
     "classifier_hidden_dim": 1280,
-    "dropout": 0.3,
+    "dropout": 0.0,
     "bn_momentum": 0.1,
 
-    # Input preprocessing: symmetric grayscale normalization maps [0, 1] -> [-1, 1]
-    # identically across all 3 repeated channels without RGB bias.
+    # Input preprocessing: ImageNet statistics matching the pretrained MobileNetV3 weights.
     "image_size": 512,
-    "normalization": "shared_grayscale",
-    "grayscale_mean": 0.5,
-    "grayscale_std": 0.5,
+    "normalization": "imagenet",
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225],
 
-    # Sampling & loss: 1:1 FL/NF per epoch, cycling through all unique NF images across epochs.
-    "sampling": "cyclic_balanced",
+    # Sampling & loss: full training data once per epoch (matching Phase 1 Experiment 6).
+    "sampling": "full_training_data",
     "loss": "ordinary_cross_entropy",
-    "augmentation": "flip_rot5",
+    "augmentation": "none",
 
-    # Optimization: single learning rate in the [1e-5, 1e-4] sweet spot for full fine-tuning.
+    # Optimization: conservative LR=1e-5 and WD=0.1 matching Phase 1 Experiment 6.
     "optimizer": "adamw",
-    "learning_rate": 3e-5,
+    "learning_rate": 1e-5,
     "min_learning_rate": 1e-7,
-    "weight_decay": 0.05,
+    "weight_decay": 0.1,
     "batch_size": 64,
 
-    # Schedule & training length: fixed 40 epochs (~11.7 full NF passes) without premature early
-    # stopping so we can inspect both peak holdout and mature/final convergence.
+    # Schedule & training length: fixed 40 epochs without premature early stopping.
     "epochs": 40,
     "scheduler": "reduce_lr_on_plateau",
-    "scheduler_patience": 2,
+    "scheduler_patience": 3,
     "scheduler_factor": 0.3,
 
-    # Mature checkpoint selection: best V1 holdout CSS after at least 2 full NF cycles (>= 7 epochs)
-    # and strong training fit, alongside overall best holdout and final-epoch checkpoints.
-    "mature_min_epoch": 7,
-    "mature_min_train_css": 0.90,
+    # Mature checkpoint selection: best V1 holdout CSS after warmup and solid training fit.
+    "mature_min_epoch": 5,
+    "mature_min_train_css": 0.60,
 
     "num_workers": 8,
     "random_seed": 42,
@@ -69,6 +66,6 @@ WANDB_TAGS = [
     "Hybrid-GOES-NOAA",
     "Stage-1",
     "full-finetuning",
-    "single-lr",
-    "cyclic-balanced",
+    "full-training-data",
+    "imagenet-norm",
 ]

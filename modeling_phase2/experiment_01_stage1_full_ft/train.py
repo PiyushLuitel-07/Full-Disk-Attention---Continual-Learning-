@@ -169,7 +169,7 @@ def build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_e
 
     for ax, (metric, title, ylim) in zip(axes.flat, panels):
         if metric == "loss":
-            ax.plot(epochs, df["balanced_train_loss"], label="Balanced Train Loss", color="#1f77b4", lw=2)
+            ax.plot(epochs, df["train_loss"], label="Train Loss", color="#1f77b4", lw=2)
             ax.plot(epochs, df["holdout_loss"], label="Holdout V1 Loss", color="#d62728", lw=2)
             ax_lr = ax.twinx()
             ax_lr.plot(epochs, df["learning_rate"], label="Learning Rate", color="#7f7f7f", ls=":", lw=1.8)
@@ -180,14 +180,15 @@ def build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_e
             lines2, labels2 = ax_lr.get_legend_handles_labels()
             ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=8)
         elif metric == "recall":
-            ax.plot(epochs, df["balanced_train_recall"], label="Bal Train Recall", color="#1f77b4", lw=2)
+            ax.plot(epochs, df["train_recall"], label="Train Recall", color="#1f77b4", lw=2)
             ax.plot(epochs, df["holdout_recall"], label="Holdout V1 Recall", color="#d62728", lw=2)
-            ax.plot(epochs, df["balanced_train_precision"], label="Bal Train Prec", color="#1f77b4", ls="--", lw=1.6)
+            ax.plot(epochs, df["train_precision"], label="Train Prec", color="#1f77b4", ls="--", lw=1.6)
             ax.plot(epochs, df["holdout_precision"], label="Holdout V1 Prec", color="#d62728", ls="--", lw=1.6)
             ax.legend(loc="best", fontsize=8)
         else:
-            ax.plot(epochs, df[f"balanced_train_{metric}"], label="Balanced Train", color="#1f77b4", lw=2)
-            ax.plot(epochs, df[f"natural_train_{metric}"], label="Natural Train", color="#2ca02c", ls="--", lw=1.8)
+            ax.plot(epochs, df[f"train_{metric}"], label="Train", color="#1f77b4", lw=2)
+            if f"natural_train_{metric}" in df.columns:
+                ax.plot(epochs, df[f"natural_train_{metric}"], label="Natural Train", color="#2ca02c", ls="--", lw=1.8)
             ax.plot(epochs, df[f"holdout_{metric}"], label="Holdout V1", color="#d62728", lw=2)
             ax.legend(loc="best", fontsize=8)
 
@@ -236,6 +237,10 @@ def main():
     if device.type == "cuda":
         torch.cuda.set_device(0)
 
+    mean = tuple(config["mean"])
+    std = tuple(config["std"])
+    sampling = config.get("sampling", "full_training_data")
+
     loaders = build_loaders(
         TRAIN_CSV,
         HOLDOUT_CSV,
@@ -243,17 +248,18 @@ def main():
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
         seed=seed,
-        grayscale_mean=float(config["grayscale_mean"]),
-        grayscale_std=float(config["grayscale_std"]),
+        mean=mean,
+        std=std,
         augment=(config.get("augmentation", "none") != "none"),
+        sampling=sampling,
     )
     test_loader = build_evaluation_loader(
         TEST_CSV,
         IMAGE_DIR,
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
-        grayscale_mean=float(config["grayscale_mean"]),
-        grayscale_std=float(config["grayscale_std"]),
+        mean=mean,
+        std=std,
     )
 
     model = build_model(
@@ -277,11 +283,14 @@ def main():
     )
 
     sampler = loaders["balanced_sampler"]
+    train_targets = loaders["targets"]
+    fl_count = sum(1 for t in train_targets if t == 1)
+    nf_count = len(train_targets) - fl_count
     system_config = {
         "device": str(device),
         "gpu_name": torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU",
-        "train_original_samples": len(loaders["natural_train"].dataset),
-        "train_samples_per_epoch": len(sampler),
+        "train_original_samples": len(train_targets),
+        "train_samples_per_epoch": len(sampler) if sampler is not None else len(train_targets),
         "holdout_samples": len(loaders["holdout"].dataset),
         "test_samples": len(test_loader.dataset),
         "total_parameters": sum(p.numel() for p in model.parameters()),
@@ -298,7 +307,7 @@ def main():
         json.dump(config, f, indent=2)
 
     run.define_metric("epoch")
-    for group in ("balanced_train", "natural_train", "holdout"):
+    for group in ("train", "natural_train", "holdout"):
         run.define_metric(f"{group}/*", step_metric="epoch")
 
     best_holdout_ckpt = run_dir / "stage1_best_holdout.pt"
@@ -325,7 +334,7 @@ def main():
     )
     logger.info(
         f"Optimizer: {config['optimizer']} | LR={config['learning_rate']} | WD={config['weight_decay']} | "
-        f"Batch={config['batch_size']} | Norm=({config['grayscale_mean']}, {config['grayscale_std']})"
+        f"Batch={config['batch_size']} | Norm={config['normalization']} | Aug={config['augmentation']}"
     )
     logger.info(
         f"Scheduler: ReduceLROnPlateau(factor={config['scheduler_factor']}, patience={config['scheduler_patience']}, "
@@ -333,7 +342,7 @@ def main():
     )
     logger.info(
         f"Data: Train={system_config['train_original_samples']:,} "
-        f"(FL={len(sampler.fl_indices):,}, NF={len(sampler.nf_indices):,}, Balanced/ep={len(sampler):,}) | "
+        f"(FL={fl_count:,}, NF={nf_count:,}, Sampling={sampling}, PerEpoch={system_config['train_samples_per_epoch']:,}) | "
         f"Holdout V1={system_config['holdout_samples']:,} | Test={system_config['test_samples']:,}"
     )
     logger.info("=" * 85)
@@ -343,12 +352,15 @@ def main():
         epoch_start = time.perf_counter()
 
         t0 = time.perf_counter()
-        balanced_metrics = run_epoch(model, loaders["balanced_train"], criterion, device, optimizer)
-        balanced_seconds = time.perf_counter() - t0
+        train_metrics = run_epoch(model, loaders["train"], criterion, device, optimizer)
+        train_seconds = time.perf_counter() - t0
 
-        t0 = time.perf_counter()
-        natural_metrics = run_epoch(model, loaders["natural_train"], criterion, device)
-        natural_seconds = time.perf_counter() - t0
+        natural_metrics = None
+        natural_seconds = 0.0
+        if loaders["natural_train"] is not None:
+            t0 = time.perf_counter()
+            natural_metrics = run_epoch(model, loaders["natural_train"], criterion, device)
+            natural_seconds = time.perf_counter() - t0
 
         t0 = time.perf_counter()
         holdout_metrics = run_epoch(model, loaders["holdout"], criterion, device)
@@ -357,44 +369,36 @@ def main():
         learning_rate = optimizer.param_groups[0]["lr"]
         scheduler.step(holdout_metrics["css"])
         new_lr = optimizer.param_groups[0]["lr"]
-        cumulative_nf.update(sampler.last_nf_indices)
+        if sampler is not None:
+            cumulative_nf.update(sampler.last_nf_indices)
 
         saved_tags = []
         if holdout_metrics["css"] > best_holdout_css:
             best_holdout_css = holdout_metrics["css"]
             best_holdout_epoch = epoch
-            save_checkpoint(best_holdout_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+            save_checkpoint(best_holdout_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, train_metrics, config)
             saved_tags.append("best_holdout")
 
         is_mature = (
             epoch >= int(config["mature_min_epoch"])
-            and balanced_metrics["css"] >= float(config["mature_min_train_css"])
+            and train_metrics["css"] >= float(config["mature_min_train_css"])
         )
         if is_mature and holdout_metrics["css"] > best_mature_css:
             best_mature_css = holdout_metrics["css"]
             best_mature_epoch = epoch
-            save_checkpoint(mature_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+            save_checkpoint(mature_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, train_metrics, config)
+            saved_tags.append("best_mature")
 
         if epoch == total_epochs:
-            save_checkpoint(last_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, balanced_metrics, config)
+            save_checkpoint(last_ckpt, model, optimizer, scheduler, epoch, holdout_metrics, train_metrics, config)
             saved_tags.append("last_epoch")
 
         epoch_seconds = time.perf_counter() - epoch_start
-        sampling_metrics = {
-            "nf_cycle": sampler.cycle,
-            "nf_used_this_epoch": len(sampler.last_nf_indices),
-            "nf_unique_this_epoch": len(set(sampler.last_nf_indices)),
-            "nf_cumulative_unique": len(cumulative_nf),
-            "nf_cumulative_coverage": len(cumulative_nf) / len(sampler.nf_indices),
-        }
         timing_metrics = {
-            "balanced_train_seconds": balanced_seconds,
-            "natural_train_seconds": natural_seconds,
+            "train_seconds": train_seconds,
             "holdout_seconds": holdout_seconds,
             "epoch_seconds": epoch_seconds,
         }
-        natural_logged = {k: v for k, v in natural_metrics.items() if k != "loss"}
-
         logged = {
             "epoch": epoch,
             "learning_rate": learning_rate,
@@ -402,12 +406,18 @@ def main():
             "best_holdout_epoch": best_holdout_epoch,
             "best_mature_css": best_mature_css if best_mature_epoch else 0.0,
             "best_mature_epoch": best_mature_epoch,
-            **{f"balanced_train/{k}": v for k, v in balanced_metrics.items()},
-            **{f"natural_train/{k}": v for k, v in natural_logged.items()},
+            **{f"train/{k}": v for k, v in train_metrics.items()},
             **{f"holdout/{k}": v for k, v in holdout_metrics.items()},
-            **{f"sampling/{k}": v for k, v in sampling_metrics.items()},
             **{f"timing/{k}": v for k, v in timing_metrics.items()},
         }
+        if natural_metrics is not None and sampler is not None:
+            logged.update({
+                **{f"natural_train/{k}": v for k, v in natural_metrics.items() if k != "loss"},
+                "sampling/nf_cycle": sampler.cycle,
+                "sampling/nf_cumulative_coverage": len(cumulative_nf) / len(sampler.nf_indices),
+                "timing/natural_train_seconds": natural_seconds,
+            })
+
         run.log(logged)
         rows.append({k.replace("/", "_"): v for k, v in logged.items()})
 
@@ -416,12 +426,16 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
 
-        logger.info(
-            f"Epoch {epoch:02d}/{total_epochs} | LR={learning_rate:.2e} | "
-            f"NF_cycle={sampler.cycle} ({sampling_metrics['nf_cumulative_coverage']:.1%}) | "
-            f"Time={epoch_seconds:.1f}s (bal={balanced_seconds:.1f}s, nat={natural_seconds:.1f}s, v1={holdout_seconds:.1f}s)"
+        cycle_info = (
+            f" | NF_cycle={sampler.cycle} ({len(cumulative_nf) / len(sampler.nf_indices):.1%})"
+            if sampler is not None
+            else ""
         )
-        logger.info(format_metrics("Balanced Train", balanced_metrics, include_loss=True))
+        logger.info(
+            f"Epoch {epoch:02d}/{total_epochs} | LR={learning_rate:.2e}{cycle_info} | "
+            f"Time={epoch_seconds:.1f}s (train={train_seconds:.1f}s, v1={holdout_seconds:.1f}s)"
+        )
+        logger.info(format_metrics("Train", train_metrics, include_loss=True))
         logger.info(format_metrics("Holdout V1", holdout_metrics, include_loss=True))
         if saved_tags:
             logger.info(f"  [CHECKPOINT SAVED] {', '.join(saved_tags)} (Best V1 CSS={best_holdout_css:.4f} @ ep {best_holdout_epoch})")
