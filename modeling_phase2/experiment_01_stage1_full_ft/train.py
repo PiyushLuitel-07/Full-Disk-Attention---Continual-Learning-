@@ -248,6 +248,7 @@ def main():
         seed=seed,
         grayscale_mean=float(config["grayscale_mean"]),
         grayscale_std=float(config["grayscale_std"]),
+        augment=(config.get("augmentation", "none") != "none"),
     )
     test_loader = build_evaluation_loader(
         TEST_CSV,

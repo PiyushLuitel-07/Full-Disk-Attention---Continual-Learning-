@@ -21,7 +21,7 @@ CONFIG = {
     "pretrained": True,
     "freeze_backbone": False,
     "classifier_hidden_dim": 1280,
-    "dropout": 0.0,  # Keep 0.0 first to verify full training fit (>=0.95 CSS) before regularizing.
+    "dropout": 0.3,  # Regularize classifier head to prevent memorizing Stage 1 training disks.
 
     # Input preprocessing: symmetric grayscale normalization maps [0, 1] -> [-1, 1]
     # identically across all 3 repeated channels without RGB bias.
@@ -33,20 +33,20 @@ CONFIG = {
     # Sampling & loss: 1:1 FL/NF per epoch, cycling through all unique NF images across epochs.
     "sampling": "cyclic_balanced",
     "loss": "ordinary_cross_entropy",
-    "augmentation": "none",
+    "augmentation": "flip_rot10",
 
     # Optimization: single learning rate in the proven [1e-5, 1e-4] sweet spot for full fine-tuning.
     "optimizer": "adamw",
     "learning_rate": 3e-5,
     "min_learning_rate": 1e-7,
-    "weight_decay": 1e-2,
+    "weight_decay": 0.05,
     "batch_size": 64,
 
     # Schedule & training length: fixed 40 epochs (~11.7 full NF passes) without premature early
     # stopping so we can inspect both peak holdout and mature/final convergence.
     "epochs": 40,
     "scheduler": "reduce_lr_on_plateau",
-    "scheduler_patience": 3,
+    "scheduler_patience": 2,
     "scheduler_factor": 0.3,
 
     # Mature checkpoint selection: best V1 holdout CSS after at least 2 full NF cycles (>= 7 epochs)

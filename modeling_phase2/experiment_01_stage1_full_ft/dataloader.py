@@ -8,17 +8,27 @@ import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler
+from torchvision import transforms
 
 
 class MagnetogramDataset(Dataset):
     """Load 512x512 magnetograms and their binary targets with symmetric grayscale normalization."""
 
-    def __init__(self, csv_file, image_directory, grayscale_mean=0.5, grayscale_std=0.5):
+    def __init__(self, csv_file, image_directory, grayscale_mean=0.5, grayscale_std=0.5, augment=False):
         rows = pd.read_csv(csv_file)
         self.paths = [Path(image_directory) / value for value in rows["label"]]
         self.targets = rows["goes_class"].astype(int).tolist()
         self.mean = (grayscale_mean, grayscale_mean, grayscale_mean)
         self.std = (grayscale_std, grayscale_std, grayscale_std)
+        self.augment = (
+            transforms.RandomChoice([
+                transforms.Lambda(lambda img: img),
+                transforms.RandomHorizontalFlip(p=1.0),
+                transforms.RandomRotation(degrees=5),
+            ])
+            if augment
+            else None
+        )
 
     def __len__(self):
         return len(self.paths)
@@ -26,6 +36,9 @@ class MagnetogramDataset(Dataset):
     def __getitem__(self, index):
         with Image.open(self.paths[index]) as opened_image:
             image = opened_image.convert("L")
+            # Augment only FL (target == 1) images since they repeat every epoch; NF images already cycle.
+            if self.augment is not None and self.targets[index] == 1:
+                image = self.augment(image)
             # Repeat single-channel magnetogram into 3 identical channels, then map [0, 1] -> [-1, 1].
             tensor = TF.to_tensor(image).repeat(3, 1, 1)
 
@@ -107,10 +120,11 @@ def build_loaders(
     seed=42,
     grayscale_mean=0.5,
     grayscale_std=0.5,
+    augment=False,
 ):
     """Build balanced training, natural-training, and holdout loaders."""
     train_data = MagnetogramDataset(
-        train_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
+        train_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std, augment=augment
     )
     holdout_data = MagnetogramDataset(
         holdout_csv, image_directory, grayscale_mean=grayscale_mean, grayscale_std=grayscale_std
