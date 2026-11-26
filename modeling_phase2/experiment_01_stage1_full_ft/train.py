@@ -152,8 +152,8 @@ def evaluate_checkpoint(ckpt_path, model, loaders, test_loader, criterion, devic
     return ckpt["epoch"], v1_metrics, test_metrics
 
 
-def plot_training_curves(metrics_path, run_dir, best_holdout_epoch, best_mature_epoch):
-    """Plot balanced train, natural train, and V1 holdout metrics across epochs."""
+def build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_epoch):
+    """Build 6-panel matplotlib figure of train and V1 holdout metrics for W&B logging."""
     df = pd.read_csv(metrics_path)
     epochs = df["epoch"]
 
@@ -208,10 +208,7 @@ def plot_training_curves(metrics_path, run_dir, best_holdout_epoch, best_mature_
         fontweight="bold",
     )
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    plot_path = run_dir / "training_curves.png"
-    fig.savefig(plot_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return plot_path
+    return fig
 
 
 def main():
@@ -246,7 +243,6 @@ def main():
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
         seed=seed,
-        normalization=config.get("normalization", "imagenet"),
         grayscale_mean=float(config["grayscale_mean"]),
         grayscale_std=float(config["grayscale_std"]),
         augment=(config.get("augmentation", "none") != "none"),
@@ -256,7 +252,6 @@ def main():
         IMAGE_DIR,
         batch_size=int(config["batch_size"]),
         num_workers=int(config["num_workers"]),
-        normalization=config.get("normalization", "imagenet"),
         grayscale_mean=float(config["grayscale_mean"]),
         grayscale_std=float(config["grayscale_std"]),
     )
@@ -457,9 +452,10 @@ def main():
         writer.writeheader()
         writer.writerows(final_rows)
 
-    plot_path = plot_training_curves(metrics_path, run_dir, best_holdout_epoch, best_mature_epoch)
-    logger.info(f"Saved training curves plot: {plot_path}")
-    run.log({"training_curves": wandb.Image(str(plot_path))})
+    fig = build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_epoch)
+    run.log({"training_curves": wandb.Image(fig)})
+    plt.close(fig)
+    logger.info("Logged training curves figure to W&B.")
     logger.info("=" * 85)
 
     run.finish()
