@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-LABEL_DIR = ROOT / "data_labeling" / "data_labels" / "noaa" / "CL_Labels"
+LABEL_DIR = ROOT / "data_labeling" / "data_labels" / "noaa_2010_2026" / "CL_Labels"
 IMAGE_DIR = ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIR = ROOT / "results" / "noaa_stage1_bayesian_tuning"
 
@@ -13,8 +13,8 @@ HOLDOUT_CSV = LABEL_DIR / "Stage1_holdout.csv"
 VALIDATION_CSV = LABEL_DIR / "validation_2024_2025.csv"
 
 
-# These defaults reproduce the central Experiment 8 design. During a sweep,
-# W&B replaces only the parameters declared in the sweep YAML file.
+# Exact configuration of the winning Experiment 9 run (20261105_114547),
+# extended to 100 epochs without early stopping.
 CONFIG = {
     "model": "mobilenet_v3_large",
     "pretrained": True,
@@ -23,29 +23,29 @@ CONFIG = {
 
     "image_size": 512,
     "batch_size": 64,
-    "epochs": 80,
+    "epochs": 100,
 
     # The classifier LR is calculated in train.py as backbone LR multiplied
     # by classifier_lr_multiplier. This prevents unrelated LR combinations.
-    "backbone_learning_rate": 1e-6,
-    "classifier_lr_multiplier": 10.0,
-    "classifier_learning_rate": 1e-5,
+    "backbone_learning_rate": 1.36e-6,
+    "classifier_lr_multiplier": 20.07,
+    "classifier_learning_rate": 2.73e-5,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
 
-    "weight_decay": 0.1,
+    "weight_decay": 0.0533,
     "optimizer": "adamw",
 
     # Every original image is used. Only the FL loss weight is tuned; NF
     # remains the reference class with weight 1.0.
     "loss": "mild_weighted_cross_entropy",
     "nf_class_weight": 1.0,
-    "fl_class_weight": 1.5,
+    "fl_class_weight": 1.99,
     "sampling": "full_training_data",
     "augmentation": "none",
     "dropout": 0.0,
 
-    "early_stopping_patience": 15,
+    "early_stopping_patience": 1000,
     "early_stopping_min_delta": 0.001,
     "scheduler_patience": 5,
     "scheduler_factor": 0.3,
