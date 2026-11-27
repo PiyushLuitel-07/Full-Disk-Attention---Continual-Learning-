@@ -48,8 +48,8 @@ CONFIG = {
     "weight_decay": 0.0533,
     "batch_size": 64,
 
-    # Schedule & training length: fixed 40 epochs without premature early stopping.
-    "epochs": 40,
+    # Schedule & training length: fixed 60 epochs without premature early stopping.
+    "epochs": 60,
     "scheduler": "reduce_lr_on_plateau",
     "scheduler_patience": 5,
     "scheduler_factor": 0.3,
