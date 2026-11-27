@@ -70,21 +70,28 @@ def add_rates(metrics):
 
 
 def build_optimizer(model, config):
-    """Build AdamW with one shared learning rate and no weight decay on biases/1D norms."""
-    decay_params = []
-    no_decay_params = []
+    """Build AdamW with differential learning rates for backbone and classifier."""
+    groups = {
+        "backbone_decay": [],
+        "backbone_no_decay": [],
+        "classifier_decay": [],
+        "classifier_no_decay": [],
+    }
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if name.endswith(".bias") or param.ndim == 1:
-            no_decay_params.append(param)
-        else:
-            decay_params.append(param)
+        section = "classifier" if name.startswith("classifier.") else "backbone"
+        decay_type = "no_decay" if name.endswith(".bias") or param.ndim == 1 else "decay"
+        groups[f"{section}_{decay_type}"].append(param)
 
-    lr = float(config["learning_rate"])
+    backbone_lr = float(config["backbone_learning_rate"])
+    classifier_lr = float(config["classifier_learning_rate"])
+    wd = float(config["weight_decay"])
     return AdamW([
-        {"params": decay_params, "lr": lr, "weight_decay": float(config["weight_decay"])},
-        {"params": no_decay_params, "lr": lr, "weight_decay": 0.0},
+        {"params": groups["backbone_decay"], "lr": backbone_lr, "weight_decay": wd},
+        {"params": groups["backbone_no_decay"], "lr": backbone_lr, "weight_decay": 0.0},
+        {"params": groups["classifier_decay"], "lr": classifier_lr, "weight_decay": wd},
+        {"params": groups["classifier_no_decay"], "lr": classifier_lr, "weight_decay": 0.0},
     ])
 
 
@@ -172,7 +179,8 @@ def build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_e
             ax.plot(epochs, df["train_loss"], label="Train Loss", color="#1f77b4", lw=2)
             ax.plot(epochs, df["holdout_loss"], label="Holdout V1 Loss", color="#d62728", lw=2)
             ax_lr = ax.twinx()
-            ax_lr.plot(epochs, df["learning_rate"], label="Learning Rate", color="#7f7f7f", ls=":", lw=1.8)
+            lr_col = "classifier_learning_rate" if "classifier_learning_rate" in df.columns else "learning_rate"
+            ax_lr.plot(epochs, df[lr_col], label="Classifier LR", color="#7f7f7f", ls=":", lw=1.8)
             ax_lr.set_yscale("log")
             ax_lr.set_ylabel("Learning Rate", color="#7f7f7f")
             ax.set_ylabel("Cross-Entropy Loss")
@@ -272,6 +280,8 @@ def main():
     ).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(model, config)
+    min_backbone_lr = float(config["min_backbone_learning_rate"])
+    min_classifier_lr = float(config["min_classifier_learning_rate"])
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode="max",
@@ -279,7 +289,7 @@ def main():
         patience=int(config["scheduler_patience"]),
         threshold=1e-3,
         threshold_mode="abs",
-        min_lr=float(config["min_learning_rate"]),
+        min_lr=[min_backbone_lr, min_backbone_lr, min_classifier_lr, min_classifier_lr],
     )
 
     sampler = loaders["balanced_sampler"]
@@ -333,12 +343,13 @@ def main():
         f"Params: {system_config['trainable_parameters']:,}/{system_config['total_parameters']:,}"
     )
     logger.info(
-        f"Optimizer: {config['optimizer']} | LR={config['learning_rate']} | WD={config['weight_decay']} | "
+        f"Optimizer: {config['optimizer']} | Backbone LR={config['backbone_learning_rate']} | "
+        f"Classifier LR={config['classifier_learning_rate']} | WD={config['weight_decay']} | "
         f"Batch={config['batch_size']} | Norm={config['normalization']} | Aug={config['augmentation']}"
     )
     logger.info(
         f"Scheduler: ReduceLROnPlateau(factor={config['scheduler_factor']}, patience={config['scheduler_patience']}, "
-        f"min_lr={config['min_learning_rate']}) | Epochs={config['epochs']}"
+        f"min_backbone_lr={config['min_backbone_learning_rate']}, min_classifier_lr={config['min_classifier_learning_rate']}) | Epochs={config['epochs']}"
     )
     logger.info(
         f"Data: Train={system_config['train_original_samples']:,} "
@@ -366,9 +377,11 @@ def main():
         holdout_metrics = run_epoch(model, loaders["holdout"], criterion, device)
         holdout_seconds = time.perf_counter() - t0
 
-        learning_rate = optimizer.param_groups[0]["lr"]
+        backbone_lr = optimizer.param_groups[0]["lr"]
+        classifier_lr = optimizer.param_groups[2]["lr"]
         scheduler.step(holdout_metrics["css"])
-        new_lr = optimizer.param_groups[0]["lr"]
+        new_backbone_lr = optimizer.param_groups[0]["lr"]
+        new_classifier_lr = optimizer.param_groups[2]["lr"]
         if sampler is not None:
             cumulative_nf.update(sampler.last_nf_indices)
 
@@ -401,7 +414,8 @@ def main():
         }
         logged = {
             "epoch": epoch,
-            "learning_rate": learning_rate,
+            "backbone_learning_rate": backbone_lr,
+            "classifier_learning_rate": classifier_lr,
             "best_holdout_css": best_holdout_css,
             "best_holdout_epoch": best_holdout_epoch,
             "best_mature_css": best_mature_css if best_mature_epoch else 0.0,
@@ -432,15 +446,18 @@ def main():
             else ""
         )
         logger.info(
-            f"Epoch {epoch:02d}/{total_epochs} | LR={learning_rate:.2e}{cycle_info} | "
+            f"Epoch {epoch:02d}/{total_epochs} | BackboneLR={backbone_lr:.2e} | ClassifierLR={classifier_lr:.2e}{cycle_info} | "
             f"Time={epoch_seconds:.1f}s (train={train_seconds:.1f}s, v1={holdout_seconds:.1f}s)"
         )
         logger.info(format_metrics("Train", train_metrics, include_loss=True))
         logger.info(format_metrics("Holdout V1", holdout_metrics, include_loss=True))
         if saved_tags:
             logger.info(f"  [CHECKPOINT SAVED] {', '.join(saved_tags)} (Best V1 CSS={best_holdout_css:.4f} @ ep {best_holdout_epoch})")
-        if new_lr < learning_rate:
-            logger.info(f"  [LR DECAY] {learning_rate:.2e} -> {new_lr:.2e}")
+        if new_classifier_lr < classifier_lr or new_backbone_lr < backbone_lr:
+            logger.info(
+                f"  [LR DECAY] Backbone {backbone_lr:.2e} -> {new_backbone_lr:.2e} | "
+                f"Classifier {classifier_lr:.2e} -> {new_classifier_lr:.2e}"
+            )
 
     logger.info("=" * 85)
     logger.info("FINAL CHECKPOINT EVALUATIONS (Holdout V1 & Untouched Test Set)")

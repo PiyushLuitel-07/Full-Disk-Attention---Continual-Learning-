@@ -36,10 +36,12 @@ CONFIG = {
     "loss": "ordinary_cross_entropy",
     "augmentation": "none",
 
-    # Optimization: conservative LR=1e-5 and WD=0.1 matching Phase 1 Experiment 6.
+    # Optimization: differential learning rate (1e-6 backbone, 1e-5 classifier) with WD=0.1.
     "optimizer": "adamw",
-    "learning_rate": 1e-5,
-    "min_learning_rate": 1e-7,
+    "backbone_learning_rate": 1e-6,
+    "classifier_learning_rate": 1e-5,
+    "min_backbone_learning_rate": 1e-8,
+    "min_classifier_learning_rate": 1e-7,
     "weight_decay": 0.1,
     "batch_size": 64,
 
@@ -66,6 +68,7 @@ WANDB_TAGS = [
     "Hybrid-GOES-NOAA",
     "Stage-1",
     "full-finetuning",
+    "differential-lr",
     "full-training-data",
     "imagenet-norm",
 ]
