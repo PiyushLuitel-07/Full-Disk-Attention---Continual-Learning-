@@ -278,7 +278,10 @@ def main():
         dropout=float(config["dropout"]),
         bn_momentum=config.get("bn_momentum", 0.1),
     ).to(device)
-    criterion = nn.CrossEntropyLoss()
+    nf_weight = float(config.get("nf_class_weight", 1.0))
+    fl_weight = float(config.get("fl_class_weight", 1.0))
+    class_weights = torch.tensor([nf_weight, fl_weight], dtype=torch.float32, device=device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = build_optimizer(model, config)
     min_backbone_lr = float(config["min_backbone_learning_rate"])
     min_classifier_lr = float(config["min_classifier_learning_rate"])
@@ -345,7 +348,8 @@ def main():
     logger.info(
         f"Optimizer: {config['optimizer']} | Backbone LR={config['backbone_learning_rate']} | "
         f"Classifier LR={config['classifier_learning_rate']} | WD={config['weight_decay']} | "
-        f"Batch={config['batch_size']} | Norm={config['normalization']} | Aug={config['augmentation']}"
+        f"Batch={config['batch_size']} | Norm={config['normalization']} | Aug={config['augmentation']} | "
+        f"LossWeights=(NF={nf_weight}, FL={fl_weight})"
     )
     logger.info(
         f"Scheduler: ReduceLROnPlateau(factor={config['scheduler_factor']}, patience={config['scheduler_patience']}, "

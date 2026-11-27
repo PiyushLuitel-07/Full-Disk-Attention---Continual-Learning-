@@ -31,24 +31,26 @@ CONFIG = {
     "mean": [0.485, 0.456, 0.406],
     "std": [0.229, 0.224, 0.225],
 
-    # Sampling & loss: full training data once per epoch (matching Phase 1 Experiment 6).
+    # Sampling & loss: full training data with mild FL class weight (matching Phase 1 exp 09 best).
     "sampling": "full_training_data",
-    "loss": "ordinary_cross_entropy",
+    "loss": "mild_weighted_cross_entropy",
+    "nf_class_weight": 1.0,
+    "fl_class_weight": 1.99,
     "augmentation": "none",
 
-    # Optimization: differential learning rate (1e-6 backbone, 1e-5 classifier) with WD=0.1.
+    # Optimization: Phase 1 exp 09 Bayesian best differential LR and weight decay.
     "optimizer": "adamw",
-    "backbone_learning_rate": 1e-6,
-    "classifier_learning_rate": 1e-5,
+    "backbone_learning_rate": 1.36e-6,
+    "classifier_learning_rate": 2.73e-5,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
-    "weight_decay": 0.1,
+    "weight_decay": 0.0533,
     "batch_size": 64,
 
     # Schedule & training length: fixed 40 epochs without premature early stopping.
     "epochs": 40,
     "scheduler": "reduce_lr_on_plateau",
-    "scheduler_patience": 3,
+    "scheduler_patience": 5,
     "scheduler_factor": 0.3,
 
     # Mature checkpoint selection: best V1 holdout CSS after warmup and solid training fit.
