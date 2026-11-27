@@ -18,19 +18,22 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 class MagnetogramDataset(Dataset):
     """Load 512x512 magnetograms and their binary targets."""
 
-    def __init__(self, csv_file, image_directory, mean=IMAGENET_MEAN, std=IMAGENET_STD, augment=False):
+    def __init__(self, csv_file, image_directory, mean=IMAGENET_MEAN, std=IMAGENET_STD, augmentation="none"):
         rows = pd.read_csv(csv_file)
         self.paths = [Path(image_directory) / value for value in rows["label"]]
         self.targets = rows["goes_class"].astype(int).tolist()
         self.mean = tuple(mean)
         self.std = tuple(std)
+        if isinstance(augmentation, bool):
+            augmentation = "both_flip_rot5" if augmentation else "none"
+        self.augmentation = augmentation
         self.augment = (
             transforms.RandomChoice([
                 transforms.Lambda(lambda img: img),
                 transforms.RandomHorizontalFlip(p=1.0),
                 transforms.RandomRotation(degrees=5),
             ])
-            if augment
+            if augmentation != "none"
             else None
         )
 
@@ -40,7 +43,9 @@ class MagnetogramDataset(Dataset):
     def __getitem__(self, index):
         with Image.open(self.paths[index]) as opened_image:
             image = opened_image.convert("L")
-            if self.augment is not None and self.targets[index] == 1:
+            if self.augment is not None and (
+                self.augmentation != "fl_flip_rot5" or self.targets[index] == 1
+            ):
                 image = self.augment(image)
             tensor = TF.to_tensor(image).repeat(3, 1, 1)
 
@@ -122,11 +127,11 @@ def build_loaders(
     seed=42,
     mean=IMAGENET_MEAN,
     std=IMAGENET_STD,
-    augment=False,
+    augmentation="none",
     sampling="full_training_data",
 ):
     """Build training and holdout loaders for full_training_data or cyclic_balanced sampling."""
-    train_data = MagnetogramDataset(train_csv, image_directory, mean=mean, std=std, augment=augment)
+    train_data = MagnetogramDataset(train_csv, image_directory, mean=mean, std=std, augmentation=augmentation)
     holdout_data = MagnetogramDataset(holdout_csv, image_directory, mean=mean, std=std)
 
     if sampling == "cyclic_balanced":

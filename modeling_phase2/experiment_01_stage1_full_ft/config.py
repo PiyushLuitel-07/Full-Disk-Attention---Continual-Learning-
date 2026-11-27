@@ -23,7 +23,7 @@ CONFIG = {
     "freeze_backbone": False,
     "trainable_backbone_blocks": 2,
     "classifier_hidden_dim": 1280,
-    "dropout": 0.0,
+    "dropout": 0.2,
     "bn_momentum": 0.1,
 
     # Input preprocessing: ImageNet statistics matching the pretrained MobileNetV3 weights.
@@ -45,7 +45,7 @@ CONFIG = {
     "classifier_learning_rate": 3e-5,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
-    "weight_decay": 0.0533,
+    "weight_decay": 0.1,
     "batch_size": 64,
 
     # Schedule & training length: fixed 60 epochs with patience=5 (matching exp 09/10).

@@ -1,5 +1,6 @@
 """Train Stage 1 MobileNetV3-Large with full fine-tuning, single LR, and CyclicBalancedSampler."""
 
+import argparse
 import csv
 import json
 import logging
@@ -221,16 +222,95 @@ def build_training_curves_figure(metrics_path, best_holdout_epoch, best_mature_e
     return fig
 
 
+def parse_args():
+    """Parse optional CLI overrides on top of config.py defaults."""
+    parser = argparse.ArgumentParser(description="Phase 2 Stage 1 MobileNetV3-Large Training")
+    parser.add_argument("--sampling", choices=["full_training_data", "cyclic_balanced"], default=None)
+    parser.add_argument("--augmentation", choices=["none", "both_flip_rot5", "fl_flip_rot5"], default=None)
+    parser.add_argument("--normalization", choices=["imagenet", "shared_grayscale"], default=None)
+    parser.add_argument(
+        "--loss",
+        choices=["sqrt_inverse_weighted_cross_entropy", "mild_weighted_cross_entropy", "ordinary_cross_entropy"],
+        default=None,
+    )
+    parser.add_argument("--nf-weight", type=float, default=None)
+    parser.add_argument("--fl-weight", type=float, default=None)
+    parser.add_argument("--backbone-lr", type=float, default=None)
+    parser.add_argument("--classifier-lr", type=float, default=None)
+    parser.add_argument("--weight-decay", type=float, default=None)
+    parser.add_argument("--dropout", type=float, default=None)
+    parser.add_argument("--bn-momentum", type=str, default=None, help="Float (e.g. 0.1) or 'none' for torchvision default (0.01)")
+    parser.add_argument("--freeze-backbone", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--trainable-backbone-blocks", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--scheduler-patience", type=int, default=None)
+    parser.add_argument("--scheduler-factor", type=float, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--num-workers", type=int, default=None)
+    parser.add_argument("--run-name", type=str, default=None, help="Optional custom suffix for run dir & W&B run name")
+    return parser.parse_args()
+
+
+def apply_cli_overrides(base_config, args):
+    """Apply CLI overrides to a copy of CONFIG."""
+    cfg = dict(base_config)
+    direct_map = {
+        "sampling": args.sampling,
+        "augmentation": args.augmentation,
+        "loss": args.loss,
+        "nf_class_weight": args.nf_weight,
+        "backbone_learning_rate": args.backbone_lr,
+        "classifier_learning_rate": args.classifier_lr,
+        "weight_decay": args.weight_decay,
+        "dropout": args.dropout,
+        "freeze_backbone": args.freeze_backbone,
+        "trainable_backbone_blocks": args.trainable_backbone_blocks,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "scheduler_patience": args.scheduler_patience,
+        "scheduler_factor": args.scheduler_factor,
+        "random_seed": args.seed,
+        "num_workers": args.num_workers,
+    }
+    for key, val in direct_map.items():
+        if val is not None:
+            cfg[key] = val
+
+    if args.fl_weight is not None:
+        cfg["fl_class_weight"] = args.fl_weight
+        if args.loss is None:
+            cfg["loss"] = "mild_weighted_cross_entropy"
+
+    if args.normalization is not None:
+        cfg["normalization"] = args.normalization
+        if args.normalization == "imagenet":
+            cfg["mean"] = [0.485, 0.456, 0.406]
+            cfg["std"] = [0.229, 0.224, 0.225]
+        else:
+            cfg["mean"] = [0.5, 0.5, 0.5]
+            cfg["std"] = [0.5, 0.5, 0.5]
+
+    if args.bn_momentum is not None:
+        cfg["bn_momentum"] = None if args.bn_momentum.lower() == "none" else float(args.bn_momentum)
+
+    return cfg
+
+
 def main():
+    args = parse_args()
+    resolved_config = apply_cli_overrides(CONFIG, args)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = RESULTS_DIR / f"mobilenet_stage1_full_ft_{timestamp}"
+    suffix = f"_{args.run_name}" if args.run_name else ""
+    run_dir = RESULTS_DIR / f"mobilenet_stage1_full_ft_{timestamp}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     run = wandb.init(
         entity=WANDB_ENTITY,
         project=WANDB_PROJECT,
-        name=f"phase2_stage1_full_ft_{timestamp}",
-        config=CONFIG,
+        name=f"phase2_stage1_full_ft_{timestamp}{suffix}",
+        config=resolved_config,
         dir=str(run_dir),
         tags=WANDB_TAGS,
         job_type="phase2-stage1-baseline",
@@ -259,7 +339,7 @@ def main():
         seed=seed,
         mean=mean,
         std=std,
-        augment=(config.get("augmentation", "none") != "none"),
+        augmentation=config.get("augmentation", "none"),
         sampling=sampling,
     )
     test_loader = build_evaluation_loader(
@@ -284,7 +364,9 @@ def main():
     nf_count = len(train_targets) - fl_count
 
     nf_weight = float(config.get("nf_class_weight", 1.0))
-    if config.get("loss") == "sqrt_inverse_weighted_cross_entropy" or config.get("fl_class_weight") is None:
+    if config.get("loss") == "ordinary_cross_entropy":
+        nf_weight, fl_weight = 1.0, 1.0
+    elif config.get("loss") == "sqrt_inverse_weighted_cross_entropy" or config.get("fl_class_weight") is None:
         fl_weight = math.sqrt(nf_count / fl_count)
     else:
         fl_weight = float(config["fl_class_weight"])
