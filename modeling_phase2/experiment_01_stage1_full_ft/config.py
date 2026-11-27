@@ -39,24 +39,24 @@ CONFIG = {
     "fl_class_weight": None,
     "augmentation": "none",
 
-    # Optimization: Phase 1 exp 09 Bayesian best differential LR and weight decay.
+    # Optimization: differential LR with enough backbone speed to reach 0.93-0.95 train CSS.
     "optimizer": "adamw",
-    "backbone_learning_rate": 1.36e-6,
-    "classifier_learning_rate": 2.73e-5,
+    "backbone_learning_rate": 5e-6,
+    "classifier_learning_rate": 3e-5,
     "min_backbone_learning_rate": 1e-8,
     "min_classifier_learning_rate": 1e-7,
     "weight_decay": 0.0533,
     "batch_size": 64,
 
-    # Schedule & training length: fixed 60 epochs without premature early stopping.
+    # Schedule & training length: fixed 60 epochs with patience=5 (matching exp 09/10).
     "epochs": 60,
     "scheduler": "reduce_lr_on_plateau",
     "scheduler_patience": 5,
     "scheduler_factor": 0.3,
 
-    # Mature checkpoint selection: best V1 holdout CSS after warmup and solid training fit.
+    # Mature checkpoint selection: best V1 holdout CSS after warmup and strong (>=0.90) training fit.
     "mature_min_epoch": 5,
-    "mature_min_train_css": 0.60,
+    "mature_min_train_css": 0.90,
 
     "num_workers": 8,
     "random_seed": 42,
