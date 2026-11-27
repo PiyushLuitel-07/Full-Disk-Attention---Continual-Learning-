@@ -48,8 +48,8 @@ CONFIG = {
     "weight_decay": 0.1,
     "batch_size": 64,
 
-    # Schedule & training length: fixed 60 epochs with patience=5 (matching exp 09/10).
-    "epochs": 60,
+    # Schedule & training length: fixed 35 epochs with patience=5 (matching exp 09/10).
+    "epochs": 35,
     "scheduler": "reduce_lr_on_plateau",
     "scheduler_patience": 5,
     "scheduler_factor": 0.3,
