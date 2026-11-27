@@ -6,12 +6,13 @@ from pathlib import Path
 # Repository and Phase 2 data/output locations.
 ROOT = Path(__file__).resolve().parents[2]
 LABEL_DIR = ROOT / "data_labeling" / "data_labels" / "GOES_2010_2018_NOAA_2019_2026" / "CL_Labels"
+STAGE1_LABEL_DIR = ROOT / "data_labeling" / "data_labels" / "GOES_2010_2018_NOAA_2019_2026" / "CL_Labels_noaa_dates"
 IMAGE_DIR = ROOT / "downloaded_data" / "hmi_jpgs"
 RESULTS_DIR = ROOT / "results_phase2" / "stage1_full_ft"
 
-# Stage 1 splits (GOES 2010-2014 train, 2015 holdout V1) and untouched 2025-2026 test set.
-TRAIN_CSV = LABEL_DIR / "Stage1_train.csv"
-HOLDOUT_CSV = LABEL_DIR / "Stage1_holdout.csv"
+# Stage 1 splits (NOAA-aligned dates: 2010-2017.01 train, 2017 holdout V1) and untouched 2025-2026 test set.
+TRAIN_CSV = STAGE1_LABEL_DIR / "Stage1_train.csv"
+HOLDOUT_CSV = STAGE1_LABEL_DIR / "Stage1_holdout.csv"
 TEST_CSV = LABEL_DIR / "test_2025_2026_july.csv"
 
 
@@ -31,11 +32,11 @@ CONFIG = {
     "mean": [0.485, 0.456, 0.406],
     "std": [0.229, 0.224, 0.225],
 
-    # Sampling & loss: full training data with mild FL class weight (matching Phase 1 exp 09 best).
+    # Sampling & loss: full training data with sqrt(NF / FL) class weight.
     "sampling": "full_training_data",
-    "loss": "mild_weighted_cross_entropy",
+    "loss": "sqrt_inverse_weighted_cross_entropy",
     "nf_class_weight": 1.0,
-    "fl_class_weight": 1.99,
+    "fl_class_weight": None,
     "augmentation": "none",
 
     # Optimization: Phase 1 exp 09 Bayesian best differential LR and weight decay.

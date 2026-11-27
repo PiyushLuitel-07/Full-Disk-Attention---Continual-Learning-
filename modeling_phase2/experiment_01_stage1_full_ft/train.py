@@ -3,6 +3,7 @@
 import csv
 import json
 import logging
+import math
 import random
 import sys
 import time
@@ -278,8 +279,16 @@ def main():
         dropout=float(config["dropout"]),
         bn_momentum=config.get("bn_momentum", 0.1),
     ).to(device)
+    train_targets = loaders["targets"]
+    fl_count = sum(1 for t in train_targets if t == 1)
+    nf_count = len(train_targets) - fl_count
+
     nf_weight = float(config.get("nf_class_weight", 1.0))
-    fl_weight = float(config.get("fl_class_weight", 1.0))
+    if config.get("loss") == "sqrt_inverse_weighted_cross_entropy" or config.get("fl_class_weight") is None:
+        fl_weight = math.sqrt(nf_count / fl_count)
+    else:
+        fl_weight = float(config["fl_class_weight"])
+    config["fl_class_weight"] = fl_weight
     class_weights = torch.tensor([nf_weight, fl_weight], dtype=torch.float32, device=device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = build_optimizer(model, config)
@@ -296,9 +305,6 @@ def main():
     )
 
     sampler = loaders["balanced_sampler"]
-    train_targets = loaders["targets"]
-    fl_count = sum(1 for t in train_targets if t == 1)
-    nf_count = len(train_targets) - fl_count
     system_config = {
         "device": str(device),
         "gpu_name": torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU",
@@ -312,6 +318,7 @@ def main():
         "holdout_csv": str(HOLDOUT_CSV),
         "test_csv": str(TEST_CSV),
         "pytorch_version": str(torch.__version__),
+        "fl_class_weight": fl_weight,
     }
     run.config.update(system_config, allow_val_change=True)
     config.update(system_config)
@@ -349,7 +356,7 @@ def main():
         f"Optimizer: {config['optimizer']} | Backbone LR={config['backbone_learning_rate']} | "
         f"Classifier LR={config['classifier_learning_rate']} | WD={config['weight_decay']} | "
         f"Batch={config['batch_size']} | Norm={config['normalization']} | Aug={config['augmentation']} | "
-        f"LossWeights=(NF={nf_weight}, FL={fl_weight})"
+        f"LossWeights=(NF={nf_weight:.2f}, FL={fl_weight:.4f})"
     )
     logger.info(
         f"Scheduler: ReduceLROnPlateau(factor={config['scheduler_factor']}, patience={config['scheduler_patience']}, "
